@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#E26B5C" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&family=Roboto:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!--
+      Pre-paint theme bootstrap. Reads localStorage and applies data-theme
+      synchronously so non-default themes don't flash the default first.
+      The literal id list MUST stay in sync with frontend/src/themes/registry.ts.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('hum.theme');
+          var ok = t === 'glass' || t === 'analog' || t === 'spotify' || t === 'youtubemusic';
+          document.documentElement.dataset.theme = ok ? t : 'glass';
+        } catch (e) {
+          document.documentElement.dataset.theme = 'glass';
+        }
+      })();
+    </script>
+    <title>Hum</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

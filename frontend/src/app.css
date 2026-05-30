@@ -1,0 +1,627 @@
+@import './themes/glass.css';
+@import './themes/analog.css';
+@import './themes/spotify.css';
+@import './themes/youtubemusic.css';
+
+/* ================================================================
+   Hum — "Glass" design system
+   ----------------------------------------------------------------
+   A frosted-glass, artwork-driven aesthetic in the spirit of
+   Apple Music. Every surface is built from translucent fills,
+   hairline borders, soft inner highlights and generous radii.
+
+   Token philosophy
+   ----------------
+   - One saturated accent (system blue).
+   - Glass tiers go from --glass-1 (near-clear) to --glass-4 (heavy)
+     so that nested surfaces can step in opacity without losing
+     the artwork tint underneath.
+   - Spacing scale is on a 4px grid but generous: defaults to 16/24/32.
+   - Easing/duration tokens are shared so every motion feels related.
+   ================================================================ */
+
+/* ---- Chromatic hue registration --------------------------------
+   Registering --art-hue as a <number> and --art-sat as a
+   <percentage> lets the browser interpolate them through CSS
+   transitions instead of snapping between discrete values.
+   Older browsers that don't support @property fall back to a
+   single-frame snap — perfectly acceptable.                       */
+@property --art-hue {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+@property --art-sat {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+:root {
+  /* ---- Base palette ---------------------------------------- */
+  --ink:          #f4f6f8;            /* primary text on glass     */
+  /* Body / metadata text ladder. Bumped from 72/52/28 to 78/62/32 so that
+     body text on warm-hued chromatic-glass surfaces stays above WCAG AA
+     contrast (4.5:1) even when --art-hue lands on yellow/orange. */
+  --ink-soft:     rgba(244, 246, 248, 0.78);
+  --ink-muted:    rgba(244, 246, 248, 0.62);
+  --ink-faint:    rgba(244, 246, 248, 0.42);
+
+  --bg-base:      #07090c;            /* the void behind artwork    */
+  --bg-deep:      #0b0d11;
+
+  /* ---- Hum brand palette ----------------------------------- */
+  /* Source: Hum Brand Guidelines v1.0 (2026). Coral is the brand
+     color — reserved for identity moments (mark, primary CTA, focus
+     ring, active state). The supporting hues exist for surface and
+     type use; the current Glass system still runs dark by default,
+     so cream/warm-white/charcoal/ink-black are available for future
+     light-theme work but not wired into chrome here.               */
+  --coral:        #E26B5C;
+  --coral-blush:  #FFF5F2;
+  --cream:        #F5F1EA;
+  --warm-white:   #F0E6D2;
+  --charcoal:     #2A2A2A;
+  --ink-black:    #1A1A1A;
+
+  /* --accent inherits coral so every existing focus/CTA/active site
+     picks up the rebrand without a sweep. */
+  --accent:        var(--coral);
+  --accent-soft:   rgba(226, 107, 92, 0.18);
+  --accent-edge:   rgba(226, 107, 92, 0.45);
+  --danger:        #ff3b30;            /* Apple system red          */
+  --danger-soft:   rgba(255, 59, 48, 0.14);
+  --danger-edge:   rgba(255, 59, 48, 0.45);
+
+  /* ---- Artwork hue tokens ---------------------------------- */
+  /* JS writes --art-hue (a bare number, 0-359) to :root when a
+     track is playing. --art-sat is bumped to 60% by the
+     :root[style*="--art-hue"] rule below when the property is
+     set, so glass surfaces pick up a chromatic tint.
+     When no artwork is playing we fall back to an *ambient*
+     brand-leaning hue at low saturation rather than neutral
+     white — glass surfaces still carry a faint chromatic life
+     ("living glass") instead of feeling inert.                  */
+  --art-hue: 210;
+  --art-sat: 18%;
+
+  /* Smooth hue transitions via registered @property.           */
+  transition:
+    --art-hue var(--dur-bg) var(--ease),
+    --art-sat var(--dur-bg) var(--ease);
+
+  /* ---- Glass tiers (translucent fills) --------------------- */
+  /* These sit ON TOP of the artwork-tinted background layer.
+     --glass-1/2/3 use light-toned hue mixing: at 4-10% opacity
+     over the backdrop they pick up a chromatic shift toward the
+     album's colour. --glass-4 stays dark for legibility but
+     carries a slight hue tint so it doesn't feel disconnected.  */
+  --glass-1:       hsla(var(--art-hue), var(--art-sat), 95%, 0.04);
+  --glass-2:       hsla(var(--art-hue), var(--art-sat), 95%, 0.07);
+  --glass-3:       hsla(var(--art-hue), var(--art-sat), 95%, 0.10);
+  --glass-4:       hsla(var(--art-hue), 30%, 10%, 0.62);     /* heavy/modal — stays dark, slight hue */
+
+  /* Hairline border with a touch of warmth.                     */
+  --hairline:      rgba(255, 255, 255, 0.08);
+  --hairline-soft: rgba(255, 255, 255, 0.05);
+  --hairline-bold: rgba(255, 255, 255, 0.14);
+
+  /* Inner top highlight applied to every glass surface — this is
+     what makes the surfaces feel like polished glass, not flat
+     translucent rectangles.                                     */
+  --inner-top-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+
+  /* ---- Structural tokens (theme-overridable) ----------------- */
+  /* These tokens absorb the structural differences between themes
+     so that swapping themes is a pure variable cascade. See
+     docs/superpowers/specs/2026-05-27-pluggable-theming-design.md. */
+
+  /* Surface blur. `--surface-blur` is the heavy blur for large panels
+     (`.glass`); `--surface-blur-control` is the lighter blur for
+     interactive controls (buttons, inputs). Flat themes set both to 0. */
+  --surface-blur:          40px;
+  --surface-blur-control:  20px;
+  --surface-saturate:    180%;
+
+  /* Button shadows + transforms. */
+  --button-shadow-rest:      var(--inner-top-highlight);
+  --button-shadow-hover:     var(--inner-top-highlight);
+  --button-transform-hover:  none;
+  --button-transform-active: scale(0.97);
+  --button-primary-shadow:   var(--inner-top-highlight), 0 6px 24px var(--accent-soft);
+
+  /* Glass utility shadow. */
+  --glass-shadow: var(--inner-top-highlight), var(--shadow-2);
+
+  /* Input shadows + per-theme text/font (mono input for terminal-feel themes). */
+  --input-shadow:      var(--inner-top-highlight);
+  --input-text-color:  var(--ink);
+  --input-font-family: inherit;
+
+  /* Grain / overlay layer. */
+  --grain-opacity: 0.35;
+  --grain-blend:   overlay;
+  --grain-image:   url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.08 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  --grain-z-index: -1;
+
+  /* Heading + eyebrow treatment. */
+  --font-display:            var(--font-sans);
+  --heading-font:            var(--font-sans);
+  --heading-transform:       none;
+  --heading-weight:          400;
+  --heading-letter-spacing:  -0.01em;
+  --eyebrow-color:           var(--ink-soft);
+  --eyebrow-transform:       none;
+  --eyebrow-letter-spacing:  0.01em;
+  --eyebrow-weight:          500;
+
+  /* Shadows: long, soft, slightly cool.                         */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 8px 30px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 24px 80px rgba(0, 0, 0, 0.55);
+
+  /* Text shadow applied to display-serif titles that sit directly on
+     the chromatic backdrop. Two-stop: a tight 1px stop to hold the
+     glyph edge against the bloom, plus a wide soft stop that creates
+     a faint own-vignette under the title so the brightest part of
+     the wash doesn't dissolve the tail of long titles.              */
+  --text-shadow-chromatic:
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 2px 18px rgba(0, 0, 0, 0.28);
+
+  /* ---- Radii ----------------------------------------------- */
+  /* Big and soft. No 4px corners anywhere in this app.          */
+  --r-sm:  10px;   /* small images, chips                        */
+  --r-md:  14px;   /* buttons, inputs                            */
+  --r-lg:  20px;   /* cards, rows                                */
+  --r-xl:  28px;   /* hero panels, modals                        */
+  --r-pill: 999px;
+
+  /* ---- Spacing scale --------------------------------------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* ---- Typography ------------------------------------------ */
+  /* One typeface — Inter (or the platform's system sans). Brand rule
+     forbids a separate display family. Weights 400 and 500 only;
+     anything 600+ reads loud against Hum's calm voice.              */
+  --font-sans:    "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                  "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono:    "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --t-xs:   11px;
+  --t-sm:   13px;
+  --t-base: 15px;
+  --t-lg:   17px;
+  --t-xl:   22px;
+  --t-2xl:  30px;
+  --t-3xl:  44px;
+  --t-hero: 64px;
+
+  --lh-tight: 1.1;
+  --lh-snug:  1.25;
+  --lh-body:  1.5;
+
+  /* ---- Motion ---------------------------------------------- */
+  /* Apple's "standard" cubic-bezier — used everywhere for
+     consistency.                                                 */
+  --ease:        cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --dur-fast:  150ms;
+  --dur-base:  300ms;
+  --dur-slow:  500ms;
+  --dur-bg:    900ms;     /* artwork crossfade                  */
+
+  /* ---- Layout ---------------------------------------------- */
+  --player-h: 96px;
+  --nav-h:    64px;
+  --tab-h:    60px;              /* mobile tab-bar height         */
+  --content-max: 1080px;
+
+  /* ---- Container rhythm ------------------------------------ */
+  /* Single source of truth for route-level container padding,
+     vertical block spacing, and max-width. Any <section> at the
+     page root references these instead of repeating literals.
+     See docs/design-system.md for the full convention.          */
+  --container-pad-block-start: var(--s-7);   /* 48 */
+  --container-pad-block-end:   var(--s-6);   /* 32 */
+  --container-pad-inline:      var(--s-6);   /* 32 */
+  --container-gap:             var(--s-5);   /* 24 */
+  --container-max:             var(--content-max);   /* 1080 */
+  --container-max-narrow:      760px;        /* Settings, forms */
+
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  font-size: var(--t-base);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---- Container rhythm — mobile clamp ------------------------
+   Global token override at the unified mobile breakpoint. Every
+   <section> consuming --container-* tokens picks up tighter mobile
+   padding without each page having to maintain its own override.
+   Per-page @media blocks remain free to override for layout-specific
+   adjustments (Video's hero column collapse at 720, Settings's row
+   stack at 560), but the section padding is now token-driven. */
+@media (max-width: 640px) {
+  :root {
+    --container-pad-block-start: var(--s-5);   /* 24 */
+    --container-pad-block-end:   var(--s-5);
+    --container-pad-inline:      var(--s-4);   /* 16 */
+    --container-gap:             var(--s-4);
+  }
+}
+
+/* When JS sets --art-hue on the root element, bump saturation
+   from the ambient 18% up to 60% so the sampled chromatic tint
+   actually reads through the glass surfaces. Using an attribute-
+   substring selector is the only reliable way to detect a custom
+   property being set without a JS listener.                     */
+:root[style*="--art-hue"] {
+  --art-sat: 60%;
+}
+
+/* ---- Reset --------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--ink);
+  overflow-x: hidden;
+}
+
+/* The body itself is the canvas. The artwork-tinted layer is a
+   sibling absolutely-positioned element inside #app, so we keep
+   #app full-bleed.                                                */
+#app {
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+}
+
+
+/* Subtle grain — gives the glass surfaces something to refract
+   instead of pure colour. SVG-encoded so no extra request.        */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: var(--grain-z-index);
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: var(--grain-blend);
+  background-image: var(--grain-image);
+}
+
+/* ---- Typography utilities ----------------------------------- */
+/* Base heading reset — Hum uses a single typeface. Headings inherit
+   --font-sans implicitly via the :root font-family. Components no
+   longer override font-family per element.                       */
+h1, h2, h3, h4 {
+  font-family: var(--heading-font);
+  font-weight: var(--heading-weight);
+  text-transform: var(--heading-transform);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--heading-letter-spacing);
+  margin: 0;
+}
+h1 { font-size: var(--t-hero); letter-spacing: -0.02em; }
+h2 { font-size: var(--t-2xl); }
+h3 { font-size: var(--t-xl); }
+h4 { font-size: var(--t-lg); }
+
+/* Eyebrow — small-caps accent label that sits above route titles and
+   above the now-playing card on Queue. One treatment, used everywhere
+   so contrast and rhythm stay locked. Components add positional
+   modifiers (margin tweaks) but never re-define color/size/weight.    */
+/* Eyebrow — small label above section titles. Hum brand: coral is
+   precious (icon/CTA/focus/active only), one typeface, no all-caps
+   body, never 600+. So this is sentence-case, soft ink, Medium 500. */
+.eyebrow {
+  color: var(--eyebrow-color);
+  font-family: var(--font-display);
+  font-size: var(--t-xs);
+  text-transform: var(--eyebrow-transform);
+  letter-spacing: var(--eyebrow-letter-spacing);
+  font-weight: var(--eyebrow-weight);
+  margin: 0 0 var(--s-2);
+}
+
+p { margin: 0; }
+
+a { color: inherit; text-decoration: none; }
+
+/* ---- Form primitives ---------------------------------------- */
+button, input, textarea, select {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+button {
+  background: var(--glass-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 10px 18px;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  box-shadow: var(--button-shadow-rest);
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+  backdrop-filter: blur(var(--surface-blur-control)) saturate(var(--surface-saturate));
+  -webkit-backdrop-filter: blur(var(--surface-blur-control)) saturate(var(--surface-saturate));
+}
+
+button:hover:not(:disabled) {
+  background: var(--glass-3);
+  border-color: var(--hairline-bold);
+  box-shadow: var(--button-shadow-hover);
+  transform: var(--button-transform-hover);
+}
+
+button:active:not(:disabled) {
+  transform: var(--button-transform-active);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Primary CTA — the one saturated button in the app.             */
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: white;
+  box-shadow: var(--button-primary-shadow);
+}
+
+button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 92%, white);
+}
+
+/* Destructive intent — neutral at rest, tints danger-red on hover/focus
+   so accidents are unlikely but the action's nature is signalled. The
+   confirm dialog still owns the actual irreversible commit step.       */
+button.destructive {
+  color: var(--ink);
+}
+button.destructive:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger-edge);
+  color: var(--danger);
+}
+button.destructive:focus-visible {
+  outline: 2px solid var(--danger-edge);
+  outline-offset: 2px;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="search"] {
+  background: var(--glass-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 12px 18px;
+  outline: none;
+  color: var(--input-text-color);
+  font-family: var(--input-font-family);
+  width: 100%;
+  box-shadow: var(--input-shadow);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-base) var(--ease);
+  backdrop-filter: blur(var(--surface-blur-control)) saturate(var(--surface-saturate));
+  -webkit-backdrop-filter: blur(var(--surface-blur-control)) saturate(var(--surface-saturate));
+}
+
+input::placeholder { color: var(--ink-faint); }
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus {
+  border-color: var(--accent-edge);
+  box-shadow:
+    var(--inner-top-highlight),
+    0 0 0 4px var(--accent-soft);
+}
+
+/* ---- Focus ring for interactive elements (keyboard nav) ------ */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- Native range slider — restyled as a thin glass track ---- */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 18px;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    to right,
+    var(--ink) 0%,
+    var(--ink) var(--progress, 0%),
+    rgba(255, 255, 255, 0.25) var(--progress, 0%),
+    rgba(255, 255, 255, 0.25) 100%
+  );
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.25);
+}
+input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  margin-top: -5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  transition: transform var(--dur-fast) var(--ease);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
+
+/* ---- Focus visibility (keyboard) ---------------------------- */
+:focus-visible {
+  outline: 2px solid var(--accent-edge);
+  outline-offset: 2px;
+  border-radius: var(--r-md);
+}
+
+/* ---- Reusable glass utility --------------------------------- */
+.glass {
+  background: var(--glass-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate));
+  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate));
+}
+
+/* ---- Button reset (strips inherited glass styling) ---------- */
+/* Icon buttons, transport controls, and inline actions all share
+   these resets. Using .btn-reset avoids repeating 5 lines of
+   background/shadow/filter overrides in every component.         */
+.btn-reset {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Solid-colour fallback where backdrop-filter is unavailable
+   (older Firefox, some Android Chrome). Keeps contrast safe.    */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  button,
+  input[type="text"],
+  input[type="password"],
+  input[type="search"],
+  .glass {
+    background: rgba(20, 22, 28, 0.92);
+  }
+}
+
+/* ---- Shared keyframes --------------------------------------- */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes crossfade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Respect users who prefer less motion.                          */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Touch tap targets: 44px minimum (iOS HIG / WCAG 2.5.5) -----
+   Blanket rule by design: icon buttons (.reorder, .remove, .close,
+   .mode) that are tighter on desktop also bump to 44px on touch — they
+   become wider rectangles, which is the right tradeoff for finger taps. */
+@media (pointer: coarse) {
+  button,
+  .nav-links a,
+  input[type="search"],
+  input[type="password"],
+  input[type="text"] {
+    min-height: 44px;
+  }
+}
+
+/* ---- Route-change focus management --------------------------- */
+/* Suppress the visible outline when focus is moved programmatically
+   (i.e., on route change). It only shows when navigated by keyboard. */
+main:focus { outline: none; }
+main:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
+
+/* ---- View Transitions API — now-playing art morph + crossfade -
+   When the mini-player art grows into the full-bleed overlay (or
+   collapses back), the browser morphs the element with the matching
+   view-transition-name. The art is the "lead" — it gets a longer,
+   spring-eased morph so it feels physical. The "root" transition
+   carries everything else (mini-player chrome fading out, expanded
+   chrome fading in) on a snappier crossfade so the art is what the
+   eye follows. Browsers without API support fall back to instant
+   state swap, which is acceptable.                                 */
+::view-transition-old(now-playing-art),
+::view-transition-new(now-playing-art) {
+  animation-duration: 520ms;
+  animation-timing-function: var(--ease-spring);
+}
+/* Snappier crossfade for everything else — chrome shouldn't drag the
+   moment when the art is the protagonist. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--ease);
+}
+/* The morph itself is GPU-accelerated; raise it above other paint
+   layers during the transition so dropshadows don't get clipped. */
+::view-transition-group(now-playing-art) {
+  z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(now-playing-art),
+  ::view-transition-new(now-playing-art),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms;
+  }
+}

@@ -1,0 +1,82 @@
+/* Spotify — flat dark with signal green. */
+:root[data-theme="spotify"] {
+  /* ---- Base palette ---------------------------------------- */
+  --ink:          #FFFFFF;
+  --ink-soft:     rgba(255, 255, 255, 0.85);
+  --ink-muted:    rgba(255, 255, 255, 0.65);
+  --ink-faint:    rgba(255, 255, 255, 0.45);
+
+  --bg-base:      #121212;
+  --bg-deep:      #000000;
+
+  /* ---- Brand palette --------------------------------------- */
+  --accent:        #1DB954;
+  --accent-soft:   rgba(29, 185, 84, 0.18);
+  --accent-edge:   rgba(29, 185, 84, 0.45);
+
+  /* ---- Opaque surfaces ------------------------------------- */
+  --glass-1:       #181818;
+  --glass-2:       #212121;
+  --glass-3:       #282828;
+  --glass-4:       #000000;
+
+  --hairline:      rgba(255, 255, 255, 0.08);
+  --hairline-soft: rgba(255, 255, 255, 0.05);
+  --hairline-bold: rgba(255, 255, 255, 0.14);
+
+  --inner-top-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+
+  /* ---- Radii: rounded rects + pill primary CTAs ------------ */
+  /* `--r-md` controls buttons; a large value clamps to a pill at
+     button heights, matching Spotify's primary CTA shape. */
+  --r-sm:   4px;
+  --r-md:   500px;
+  --r-lg:   8px;
+  --r-xl:   8px;
+  --r-pill: 500px;
+
+  /* ---- Typography ------------------------------------------ */
+  --font-sans:    "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono:    "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-display: var(--font-sans);
+
+  /* ---- Motion ---------------------------------------------- */
+  --ease:        cubic-bezier(0.3, 0, 0.4, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:  100ms;
+  --dur-base:  200ms;
+  --dur-slow:  400ms;
+  --dur-bg:    600ms;
+
+  /* ---- Structural overrides -------------------------------- */
+  --surface-blur:         0px;
+  --surface-blur-control: 0px;
+  --surface-saturate:     100%;
+
+  --button-shadow-rest:      0 1px 2px rgba(0, 0, 0, 0.4);
+  --button-shadow-hover:     0 2px 6px rgba(0, 0, 0, 0.5);
+  --button-transform-hover:  scale(1.04);
+  --button-transform-active: scale(0.98);
+  --button-primary-shadow:   0 4px 12px rgba(29, 185, 84, 0.35);
+
+  --glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  --input-shadow:      none;
+  --input-text-color:  var(--ink);
+  --input-font-family: var(--font-sans);
+
+  --grain-opacity: 0;
+  --grain-blend:   normal;
+  --grain-z-index: -1;
+  --grain-image:   none;
+
+  --heading-font:           var(--font-sans);
+  --heading-transform:      none;
+  --heading-weight:         700;
+  --heading-letter-spacing: -0.04em;
+
+  --eyebrow-color:          var(--ink-soft);
+  --eyebrow-transform:      uppercase;
+  --eyebrow-letter-spacing: 0.08em;
+  --eyebrow-weight:         700;
+}

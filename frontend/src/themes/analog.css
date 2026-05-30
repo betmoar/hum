@@ -1,0 +1,88 @@
+/* Analog Hi-Fi — brutalist amber theme. */
+:root[data-theme="analog"] {
+  /* ---- Base palette ---------------------------------------- */
+  --ink:          #FFD1A9;
+  --ink-soft:     rgba(255, 209, 169, 0.78);
+  --ink-muted:    rgba(255, 209, 169, 0.62);
+  --ink-faint:    rgba(255, 209, 169, 0.42);
+
+  --bg-base:      #120F0D;
+  --bg-deep:      #050403;
+
+  /* ---- Brand palette (overrides Hum coral set) ------------- */
+  --amber:        #FF4500;
+  --amber-blush:  #FFF0EB;
+  --charcoal:     #1E1A17;
+  --ink-black:    #050403;
+
+  --accent:        var(--amber);
+  --accent-soft:   rgba(255, 69, 0, 0.18);
+  --accent-edge:   rgba(255, 69, 0, 0.45);
+
+  /* ---- Opaque surfaces (replace translucent glass) --------- */
+  --glass-1:       #171411;
+  --glass-2:       #1E1A17;
+  --glass-3:       #26211D;
+  --glass-4:       #050403;
+
+  --hairline:      rgba(255, 209, 169, 0.15);
+  --hairline-soft: rgba(255, 209, 169, 0.08);
+  --hairline-bold: rgba(255, 209, 169, 0.3);
+
+  --inner-top-highlight: inset 0 0 0 1px var(--hairline-soft);
+
+  /* ---- Radii: zero (brutalist) ----------------------------- */
+  --r-sm:   0px;
+  --r-md:   0px;
+  --r-lg:   0px;
+  --r-xl:   0px;
+  --r-pill: 0px;
+
+  /* ---- Typography ------------------------------------------ */
+  --font-sans:    "JetBrains Mono", monospace;
+  --font-mono:    "JetBrains Mono", monospace;
+  --font-display: "Syne", sans-serif;
+
+  /* ---- Motion: instant, snappy ----------------------------- */
+  --ease:        cubic-bezier(0, 0, 0, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --dur-fast: 50ms;
+  --dur-base: 100ms;
+  --dur-slow: 200ms;
+  --dur-bg:   0ms;
+
+  /* ---- Structural overrides -------------------------------- */
+  --surface-blur:         0px;
+  --surface-blur-control: 0px;
+  --surface-saturate:     100%;
+
+  --button-shadow-rest:      3px 3px 0 0 var(--hairline-bold);
+  --button-shadow-hover:     1px 1px 0 0 var(--hairline-bold);
+  --button-transform-hover:  translate(2px, 2px);
+  --button-transform-active: translate(3px, 3px);
+  --button-primary-shadow:   3px 3px 0 0 var(--ink);
+
+  --glass-shadow: 4px 4px 0 0 var(--hairline-soft);
+
+  --input-shadow:      inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+  --input-text-color:  var(--accent);
+  --input-font-family: var(--font-mono);
+
+  /* CRT-static overlay: above content, screen-blended, lower opacity. */
+  --grain-opacity: 0.15;
+  --grain-blend:   screen;
+  /* Above page chrome (tab bar is at z-index 100) but below the
+     NowPlaying overlay (z-index 200) so it doesn't cover modals. */
+  --grain-z-index: 150;
+  --grain-image:   url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.7'/></svg>");
+
+  --heading-font:           var(--font-display);
+  --heading-transform:      uppercase;
+  --heading-weight:         700;
+  --heading-letter-spacing: -0.02em;
+
+  --eyebrow-color:          var(--accent);
+  --eyebrow-transform:      uppercase;
+  --eyebrow-letter-spacing: 0.1em;
+  --eyebrow-weight:         800;
+}

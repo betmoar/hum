@@ -1,0 +1,9 @@
+/* Glass theme — the Hum default.
+ * All Glass values are defined in app.css under :root. This file exists
+ * so that switching back to Glass from another theme is an explicit
+ * data-theme="glass" match (rather than relying on attribute absence),
+ * and so the registry's theme symmetry holds. Add overrides here only
+ * if you ever want Glass to diverge from the :root defaults. */
+:root[data-theme="glass"] {
+  /* Intentionally empty — matches :root. */
+}

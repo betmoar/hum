@@ -1,0 +1,80 @@
+/* YouTube Music — near-black canvas, red brand accent, Roboto. */
+:root[data-theme="youtubemusic"] {
+  /* ---- Base palette ---------------------------------------- */
+  --ink:          #FFFFFF;
+  --ink-soft:     rgba(255, 255, 255, 0.80);
+  --ink-muted:    rgba(255, 255, 255, 0.60);
+  --ink-faint:    rgba(255, 255, 255, 0.42);
+
+  --bg-base:      #030303;
+  --bg-deep:      #000000;
+
+  /* ---- Brand palette --------------------------------------- */
+  --accent:        #FF0033;
+  --accent-soft:   rgba(255, 0, 51, 0.18);
+  --accent-edge:   rgba(255, 0, 51, 0.45);
+
+  /* ---- Opaque surfaces ------------------------------------- */
+  --glass-1:       #1f1f1f;
+  --glass-2:       #272727;
+  --glass-3:       #3f3f3f;
+  --glass-4:       #0c0c0c;
+
+  --hairline:      rgba(255, 255, 255, 0.10);
+  --hairline-soft: rgba(255, 255, 255, 0.06);
+  --hairline-bold: rgba(255, 255, 255, 0.18);
+
+  --inner-top-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+
+  /* ---- Radii: gently rounded ------------------------------- */
+  --r-sm:   4px;
+  --r-md:   8px;
+  --r-lg:   8px;
+  --r-xl:   12px;
+  --r-pill: 999px;
+
+  /* ---- Typography ------------------------------------------ */
+  --font-sans:    "Roboto", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono:    "Roboto Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-display: var(--font-sans);
+
+  /* ---- Motion ---------------------------------------------- */
+  --ease:        cubic-bezier(0.4, 0, 0.2, 1);   /* Material standard */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 100ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+  --dur-bg:   500ms;
+
+  /* ---- Structural overrides -------------------------------- */
+  --surface-blur:         0px;
+  --surface-blur-control: 0px;
+  --surface-saturate:     100%;
+
+  --button-shadow-rest:      0 1px 2px rgba(0, 0, 0, 0.4);
+  --button-shadow-hover:     0 2px 8px rgba(0, 0, 0, 0.5);
+  --button-transform-hover:  none;
+  --button-transform-active: scale(0.97);
+  --button-primary-shadow:   0 2px 8px rgba(255, 0, 51, 0.4);
+
+  --glass-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+
+  --input-shadow:      none;
+  --input-text-color:  var(--ink);
+  --input-font-family: var(--font-sans);
+
+  --grain-opacity: 0;
+  --grain-blend:   normal;
+  --grain-z-index: -1;
+  --grain-image:   none;
+
+  --heading-font:           var(--font-sans);
+  --heading-transform:      none;
+  --heading-weight:         500;
+  --heading-letter-spacing: -0.02em;
+
+  --eyebrow-color:          var(--ink-soft);
+  --eyebrow-transform:      none;
+  --eyebrow-letter-spacing: 0;
+  --eyebrow-weight:         500;
+}
