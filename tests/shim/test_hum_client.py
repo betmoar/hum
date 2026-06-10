@@ -4,7 +4,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from shim.hum_client import HumClient
+from shim.hum_client import HumClient, _raise_for_hum_error, _ytimg_variant
+from shim.subsonic import GENERIC, NOT_FOUND, SubsonicError
 
 
 def _client(handler: "httpx.MockTransport") -> HumClient:
@@ -95,3 +96,48 @@ async def test_playlist_art_uses_first_item_thumbnail() -> None:
         assert media_type == "image/jpeg"
     finally:
         await c.close()
+
+
+# ----- ytimg variant sizing (spec §3.5) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [
+        (None, "https://i.ytimg.com/vi/abc/hqdefault.jpg"),
+        (90, "https://i.ytimg.com/vi/abc/default.jpg"),
+        (300, "https://i.ytimg.com/vi/abc/mqdefault.jpg"),
+        (1000, "https://i.ytimg.com/vi/abc/hqdefault.jpg"),  # capped at hqdefault
+    ],
+)
+def test_ytimg_variant_rewrites_by_size(size: int | None, expected: str) -> None:
+    assert _ytimg_variant("https://i.ytimg.com/vi/abc/hqdefault.jpg", size) == expected
+
+
+def test_ytimg_variant_passes_through_non_ytimg() -> None:
+    signed = "http://hum.local/proxy/thumbnail/abc?itag=0&exp=1&sig=x"
+    assert _ytimg_variant(signed, 300) == signed
+
+
+# ----- error envelope mapping (spec §5 / error envelopes) -------------------
+
+
+def test_unplayable_maps_to_not_found() -> None:
+    r = httpx.Response(422, json={"error": "LIVE_NOT_SUPPORTED", "message": "live"})
+    with pytest.raises(SubsonicError) as exc:
+        _raise_for_hum_error(r)
+    assert exc.value.code == NOT_FOUND
+    assert "LIVE_NOT_SUPPORTED" in exc.value.message
+    assert "live" in exc.value.message
+
+
+def test_upstream_5xx_maps_to_generic() -> None:
+    r = httpx.Response(502, json={"error": "UPSTREAM_ERROR", "message": "boom"})
+    with pytest.raises(SubsonicError) as exc:
+        _raise_for_hum_error(r)
+    assert exc.value.code == GENERIC
+    assert "502" in exc.value.message
+
+
+def test_200_does_not_raise() -> None:
+    _raise_for_hum_error(httpx.Response(200, json={"ok": True}))

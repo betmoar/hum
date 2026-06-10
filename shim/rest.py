@@ -202,10 +202,10 @@ async def get_album(item_id: str = Query(..., alias="id")) -> JSONResponse:
 @router.get("/getCoverArt.view")
 async def get_cover_art(
     item_id: str = Query(..., alias="id"),
-    size: int | None = Query(None, ge=1),  # accepted; resizing is Phase 5
+    size: int | None = Query(None, ge=1),
 ) -> Response:
     sid = ids.parse_id(item_id)
-    content, media_type = await hum_client.get_client().fetch_art(sid.kind, sid.value)
+    content, media_type = await hum_client.get_client().fetch_art(sid.kind, sid.value, size)
     return Response(content=content, media_type=media_type)
 
 

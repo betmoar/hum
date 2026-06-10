@@ -9,13 +9,19 @@ from __future__ import annotations
 
 import contextlib
 import time
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
 import httpx
 
 from shim.config import get_settings
 from shim.models import HumPlaylistInfo, HumSearchHit, HumVideoDetails
 from shim.subsonic import GENERIC, NOT_FOUND, SubsonicError
+
+# YouTube thumbnail hosts and the always-present size variants. We cap at
+# hqdefault (480x360): sddefault/maxresdefault 404 for many uploads, and a 404
+# here would surface as "no cover art". default/mqdefault/hqdefault always exist.
+_YTIMG_HOSTS = {"i.ytimg.com", "img.youtube.com", "i9.ytimg.com"}
+_YTIMG_EXTS = (".jpg", ".jpeg", ".webp")
 
 
 def _exp_param(url: str) -> float | None:
@@ -28,14 +34,38 @@ def _exp_param(url: str) -> float | None:
         return None
 
 
+def _ytimg_variant(url: str, size: int | None) -> str:
+    """Rewrite a YouTube thumbnail URL to the variant nearest `size` (spec §3.5
+    cover-art sizing without decoding/resizing). Non-ytimg URLs pass through."""
+    if size is None:
+        return url
+    parsed = urlparse(url)
+    if parsed.hostname not in _YTIMG_HOSTS:
+        return url
+    base, sep, name = parsed.path.rpartition("/")
+    if not sep or "." not in name or not name.lower().endswith(_YTIMG_EXTS):
+        return url
+    ext = name[name.rfind(".") :]
+    variant = "default" if size <= 120 else "mqdefault" if size <= 320 else "hqdefault"
+    return urlunparse(parsed._replace(path=f"{base}/{variant}{ext}"))
+
+
 def _raise_for_hum_error(r: httpx.Response) -> None:
     if r.status_code == 200:
         return
-    if r.status_code == 404:
-        raise SubsonicError(NOT_FOUND, "not found on Hum")
-    detail = ""
+    code = ""
+    message = ""
     with contextlib.suppress(ValueError, KeyError, TypeError):
-        detail = str(r.json().get("message", ""))
+        body = r.json()
+        code = str(body.get("error", ""))
+        message = str(body.get("message", ""))
+    detail = message or f"HTTP {r.status_code}"
+    if code:
+        detail = f"{detail} ({code})"
+    # Client-side conditions (not found / unplayable / region-locked / live)
+    # → Subsonic 70; transient/upstream → generic 0.
+    if r.status_code in (403, 404, 410, 415, 422, 451):
+        raise SubsonicError(NOT_FOUND, detail)
     raise SubsonicError(GENERIC, f"Hum upstream error {r.status_code}: {detail}")
 
 
@@ -126,12 +156,16 @@ class HumClient:
 
     # ----- cover art ------------------------------------------------------
 
-    async def fetch_art(self, kind: str, value: str) -> tuple[bytes, str]:
+    async def fetch_art(
+        self, kind: str, value: str, size: int | None = None
+    ) -> tuple[bytes, str]:
         """Fetch cover art bytes server-side (spec §3.5) — never an extraction.
 
         Video: cached signed Hum thumbnail → remembered search-hit thumbnail →
         the predictable i.ytimg URL. Playlist: remembered playlist thumbnail →
-        the playlist's first item thumbnail (cheap /api/playlist call).
+        the playlist's first item thumbnail (cheap /api/playlist call). `size`
+        selects a ytimg variant where applicable; signed Hum thumbnails are
+        served as-is (resizing them would mean decoding).
         """
         if kind == "video":
             url, client = self._video_art_source(value)
@@ -139,7 +173,7 @@ class HumClient:
             url, client = await self._playlist_art_source(value)
         else:
             raise SubsonicError(NOT_FOUND, f"no cover art for {kind} ids")
-        r = await client.get(url)
+        r = await client.get(_ytimg_variant(url, size))
         if r.status_code != 200:
             raise SubsonicError(NOT_FOUND, f"cover art unavailable for {kind}:{value}")
         return r.content, r.headers.get("content-type", "image/jpeg")

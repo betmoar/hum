@@ -25,7 +25,9 @@ class FakeHumClient:
         assert self._playlist is not None
         return self._playlist
 
-    async def fetch_art(self, kind: str, value: str) -> tuple[bytes, str]:
+    async def fetch_art(
+        self, kind: str, value: str, size: int | None = None
+    ) -> tuple[bytes, str]:
         return b"art-bytes", "image/jpeg"
 
 
