@@ -7,9 +7,12 @@ from pathlib import Path
 from pydantic import AliasChoices, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Anchor .env to the repo root (this file is <root>/shim/config.py), not the
+# Anchor paths to the repo root (this file is <root>/shim/config.py), not the
 # current working directory — launching from a subdir must not lose settings.
-_ENV_FILE = str(Path(__file__).resolve().parents[1] / ".env")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ENV_FILE = str(_REPO_ROOT / ".env")
+# Default location for shim-side runtime state (favourites). Gitignored.
+DATA_DIR_DEFAULT = _REPO_ROOT / ".shim-data"
 
 
 class ShimSettings(BaseSettings):
@@ -48,6 +51,9 @@ class ShimSettings(BaseSettings):
     # Audio delivery (spec §4)
     ffmpeg_path: str = "ffmpeg"
     mp3_bitrate_kbps: int = 256
+
+    # Shim-side state (favourites). Empty → DATA_DIR_DEFAULT (<repo>/.shim-data).
+    data_dir: str = ""
 
     # Details cache (spec §5): ttl = min(max_ttl, exp - now - safety)
     details_cache_max_ttl_seconds: float = 1800.0

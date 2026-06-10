@@ -172,3 +172,6 @@ frontend/node_modules/
 frontend/dist/
 frontend/.svelte-kit/
 frontend/coverage/
+
+# Shim runtime state
+.shim-data/

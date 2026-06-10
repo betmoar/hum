@@ -11,13 +11,22 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from shim import hum_client, ids, transcode
+from shim import hum_client, ids, store, transcode
 from shim.auth import require_subsonic_auth
 from shim.config import get_settings
 from shim.models import HumPlaylistItem, HumSearchHit, looks_live
+from shim.store import StarredItem
 from shim.subsonic import NOT_FOUND, SubsonicError, ok_response
 
 router = APIRouter(prefix="/rest", dependencies=[Depends(require_subsonic_auth)])
+
+
+def _remember(entry: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Record an emitted song/album so a later star can render its name
+    without re-fetching from Hum. Returns the entry for inline use."""
+    name = entry.get("title") or entry.get("name") or entry["id"]
+    store.remember(entry["id"], kind, str(name), str(entry.get("artist", "Unknown")))
+    return entry
 
 
 def _song_from_hit(hit: HumSearchHit) -> dict[str, Any]:
@@ -87,14 +96,16 @@ async def search3(
 ) -> JSONResponse:
     hits = await hum_client.get_client().search(query, limit=song_count)
     songs = [
-        _song_from_hit(h)
+        _remember(_song_from_hit(h), "song")
         for h in hits
         # Spec §3.4 polarity: radio.py keeps live hits, search3 drops them.
         if h.kind == "video" and not looks_live(h)
     ][:song_count]
     # Playlist hits become drill-in albums; channels (artists) are out of scope
     # for the Search + Playlists hierarchy.
-    albums = [_album_from_hit(h) for h in hits if h.kind == "playlist"][:song_count]
+    albums = [
+        _remember(_album_from_hit(h), "album") for h in hits if h.kind == "playlist"
+    ][:song_count]
     return ok_response({"searchResult3": {"artist": [], "album": albums, "song": songs}})
 
 
@@ -150,7 +161,7 @@ async def get_playlist(item_id: str = Query(..., alias="id")) -> JSONResponse:
     if sid.kind != "playlist":
         raise SubsonicError(NOT_FOUND, "getPlaylist expects a pl: id")
     info = await hum_client.get_client().playlist(sid.value)
-    entries = [_song_from_playlist_item(i) for i in info.items]
+    entries = [_remember(_song_from_playlist_item(i), "song") for i in info.items]
     return ok_response(
         {
             "playlist": {
@@ -171,7 +182,7 @@ async def get_album(item_id: str = Query(..., alias="id")) -> JSONResponse:
     if sid.kind != "playlist":
         raise SubsonicError(NOT_FOUND, "getAlbum expects a pl: id")
     info = await hum_client.get_client().playlist(sid.value)
-    songs = [_song_from_playlist_item(i) for i in info.items]
+    songs = [_remember(_song_from_playlist_item(i), "song") for i in info.items]
     pid = ids.playlist_id(sid.value)
     return ok_response(
         {
@@ -196,6 +207,83 @@ async def get_cover_art(
     sid = ids.parse_id(item_id)
     content, media_type = await hum_client.get_client().fetch_art(sid.kind, sid.value)
     return Response(content=content, media_type=media_type)
+
+
+# ----- favourites + scrobble (spec §3.3 — shim-side; Hum stores nothing) ----
+
+
+def _starred2_lists() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    songs: list[dict[str, Any]] = []
+    albums: list[dict[str, Any]] = []
+    for it in store.get_store().starred():
+        if it.kind == "song":
+            songs.append(
+                {
+                    "id": it.id,
+                    "title": it.title,
+                    "artist": it.artist,
+                    "isDir": False,
+                    "type": "music",
+                    "coverArt": it.id,
+                    "contentType": "audio/mp4",
+                    "suffix": "m4a",
+                }
+            )
+        else:
+            albums.append(
+                {
+                    "id": it.id,
+                    "name": it.title,
+                    "title": it.title,
+                    "artist": it.artist,
+                    "coverArt": it.id,
+                }
+            )
+    return songs, albums
+
+
+@router.get("/star")
+@router.get("/star.view")
+async def star(item_id: str = Query(..., alias="id")) -> JSONResponse:
+    sid = ids.parse_id(item_id)
+    kind = "song" if sid.kind == "video" else "album"
+    seen = store.recall(item_id)
+    title, artist = (seen[1], seen[2]) if seen else (item_id, "Unknown")
+    store.get_store().star(StarredItem(id=item_id, kind=kind, title=title, artist=artist))
+    return ok_response()
+
+
+@router.get("/unstar")
+@router.get("/unstar.view")
+async def unstar(item_id: str = Query(..., alias="id")) -> JSONResponse:
+    ids.parse_id(item_id)  # validate shape; unknown ids are a harmless no-op
+    store.get_store().unstar(item_id)
+    return ok_response()
+
+
+@router.get("/getStarred2")
+@router.get("/getStarred2.view")
+async def get_starred2() -> JSONResponse:
+    songs, albums = _starred2_lists()
+    return ok_response({"starred2": {"artist": [], "album": albums, "song": songs}})
+
+
+@router.get("/getStarred")
+@router.get("/getStarred.view")
+async def get_starred() -> JSONResponse:
+    songs, albums = _starred2_lists()
+    return ok_response({"starred": {"artist": [], "album": albums, "song": songs}})
+
+
+@router.get("/scrobble")
+@router.get("/scrobble.view")
+async def scrobble(
+    item_id: str = Query(..., alias="id"),
+    submission: bool = Query(True),
+) -> JSONResponse:
+    # Hum has no play history to write to (spec §9.4); accept gracefully so
+    # bonob's now-playing/scrobble reports don't error.
+    return ok_response()
 
 
 @router.get("/stream")

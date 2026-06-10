@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,3 +43,16 @@ def shim_client() -> TestClient:
     from shim.main import app
 
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolate_favourites(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> Iterator[None]:
+    """Point the favourites store at a per-test temp dir and clear the
+    seen-cache + singleton, so star/unstar state never leaks across tests
+    or touches the repo's real .shim-data."""
+    from shim import store
+
+    store.reset_store()
+    monkeypatch.setattr(store, "DATA_DIR_DEFAULT", tmp_path)
+    yield
+    store.reset_store()
