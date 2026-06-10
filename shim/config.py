@@ -55,6 +55,10 @@ class ShimSettings(BaseSettings):
     # Shim-side state (favourites). Empty → DATA_DIR_DEFAULT (<repo>/.shim-data).
     data_dir: str = ""
 
+    # Curated playlists for the Sonos "Playlist" shelf — comma-separated YouTube
+    # playlist IDs. Combined with starred (pl:) playlists; Hum can't enumerate.
+    pinned_playlists: str = ""
+
     # Seekable remux (spec §4 mode (b)): materialize the remuxed fMP4 to a
     # cached temp file and serve it with Range support (gives Sonos a seek bar)
     # at the cost of first-byte latency. Off by default — the streaming pipe
@@ -72,6 +76,9 @@ class ShimSettings(BaseSettings):
     upstream_read_timeout: float = 30.0
 
     log_level: str = "INFO"
+
+    def pinned_playlist_ids(self) -> list[str]:
+        return [p.strip() for p in self.pinned_playlists.split(",") if p.strip()]
 
 
 @lru_cache

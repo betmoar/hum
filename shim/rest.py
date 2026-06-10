@@ -6,6 +6,7 @@ envelopes via the SubsonicError handler in shim.main.
 """
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -147,12 +148,42 @@ async def get_album_list2(
     return ok_response({"albumList2": {"album": []}})
 
 
+def _pinned_playlist_ids() -> list[str]:
+    """Playlist ids for the Sonos shelf: SHIM_PINNED_PLAYLISTS config first,
+    then starred playlists (pl: ids), de-duplicated, order preserved."""
+    ids_list = list(get_settings().pinned_playlist_ids())
+    seen = set(ids_list)
+    for it in store.get_store().starred():
+        if it.kind == "album" and it.id.startswith("pl:"):
+            value = it.id[len("pl:") :]
+            if value not in seen:
+                seen.add(value)
+                ids_list.append(value)
+    return ids_list
+
+
+async def _playlist_summary(yt_playlist_id: str) -> dict[str, Any]:
+    info = await hum_client.get_client().playlist(yt_playlist_id)
+    return {
+        "id": ids.playlist_id(yt_playlist_id),
+        "name": info.title,
+        "owner": info.author or "Unknown",
+        "songCount": info.video_count,
+    }
+
+
 @router.get("/getPlaylists")
 @router.get("/getPlaylists.view")
 async def get_playlists() -> Response:
-    # Hum can't enumerate playlists (no library); they're reached via search →
-    # getPlaylist by id. Pinning would need shim-side storage (favourites).
-    return ok_response({"playlists": {"playlist": []}})
+    # Hum can't enumerate playlists, so the shelf is the curated/starred set
+    # (spec §3.2). Resolve summaries concurrently; drop any that fail (e.g. a
+    # deleted playlist) rather than failing the whole shelf.
+    pins = _pinned_playlist_ids()
+    results = await asyncio.gather(
+        *(_playlist_summary(pid) for pid in pins), return_exceptions=True
+    )
+    playlists = [r for r in results if isinstance(r, dict)]
+    return ok_response({"playlists": {"playlist": playlists}})
 
 
 @router.get("/getPlaylist")

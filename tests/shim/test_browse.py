@@ -63,10 +63,54 @@ def test_get_album_list2_empty(
     assert body["albumList2"]["album"] == []
 
 
-def test_get_playlists_empty(
-    shim_client: TestClient, subsonic_auth: dict[str, str]
+def test_get_playlists_empty_without_pins(
+    shim_client: TestClient, subsonic_auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _install(monkeypatch, FakeHumClient())
     body = _resp(shim_client, subsonic_auth, "/rest/getPlaylists")
+    assert body["playlists"]["playlist"] == []
+
+
+def test_get_playlists_lists_config_pins(
+    shim_client: TestClient, subsonic_auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shim.config import get_settings
+
+    _install(monkeypatch, FakeHumClient(playlist=_playlist()))
+    monkeypatch.setattr(get_settings(), "pinned_playlists", _PLID)
+    body = _resp(shim_client, subsonic_auth, "/rest/getPlaylists")
+    playlists = body["playlists"]["playlist"]
+    assert [p["id"] for p in playlists] == [f"pl:{_PLID}"]
+    assert playlists[0]["name"] == "Chill Mix"
+    assert playlists[0]["songCount"] == 2
+
+
+def test_get_playlists_includes_starred(
+    shim_client: TestClient, subsonic_auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shim import store
+
+    _install(monkeypatch, FakeHumClient(playlist=_playlist()))
+    store.get_store().star(
+        store.StarredItem(id=f"pl:{_PLID}", kind="album", title="Chill Mix", artist="Curator")
+    )
+    body = _resp(shim_client, subsonic_auth, "/rest/getPlaylists")
+    assert [p["id"] for p in body["playlists"]["playlist"]] == [f"pl:{_PLID}"]
+
+
+def test_get_playlists_drops_failed_lookups(
+    shim_client: TestClient, subsonic_auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from shim.config import get_settings
+
+    class _Failing(FakeHumClient):
+        async def playlist(self, playlist_id: str) -> HumPlaylistInfo:
+            raise RuntimeError("deleted playlist")
+
+    _install(monkeypatch, _Failing())
+    monkeypatch.setattr(get_settings(), "pinned_playlists", _PLID)
+    body = _resp(shim_client, subsonic_auth, "/rest/getPlaylists")
+    # A failing pin is skipped, not fatal.
     assert body["playlists"]["playlist"] == []
 
 
