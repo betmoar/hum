@@ -302,14 +302,21 @@ checking per device, but not required given current setup.
 Each phase is independently testable. Do not start a phase until the previous
 one is green.
 
-### Phase 0 — Scaffolding
+> **Build status (code phases done; hardware phases pending).** Phases 0, 1, 2,
+> and the code-able parts of Phase 5 are implemented, unit-tested (ruff + mypy
+> --strict + pytest green), and on PR #2. What remains is human/hardware: the
+> Amperfy listening/browse test (Phase 1/2 exit), then bonob + Sonos (Phases
+> 3–4). An opt-in live harness (`pytest -m integration`) produces the audio
+> evidence for the Amperfy step.
+
+### Phase 0 — Scaffolding ✅ done
 
 - Stand up the shim as a sibling FastAPI service in the Hum repo (stack
   decision resolved, §2), with `/rest/ping` returning a valid
   `subsonic-response` JSON envelope.
-- **Exit test:** `curl` ping returns the correct envelope.
+- **Exit test:** `curl` ping returns the correct envelope. ✅
 
-### Phase 1 — Auth + search + stream (minimum playable)
+### Phase 1 — Auth + search + stream (minimum playable) ✅ code done
 
 - Implement `ping`, `getLicense`, `search3`, `stream`, `getCoverArt`.
 - Implement Subsonic token auth (`t`+`s` salted-MD5; plaintext `p` fallback
@@ -322,14 +329,17 @@ one is green.
 - **Exit test:** point **Amperfy** at the shim. Search a track, play it, hear
   audio. Verify both an AAC-remuxed and a forced-mp3 stream play. This
   validates the hardest parts with a trusted client. **Do not proceed to Sonos
-  until Amperfy plays cleanly.**
+  until Amperfy plays cleanly.** ⏳ awaiting human test.
 
-### Phase 2 — Browsing
+### Phase 2 — Browsing ✅ code done
 
 - Implement `getMusicFolders`, `getArtists`/`getIndexes`, `getPlaylists`,
-  `getPlaylist`, `getAlbumList2` (empty `recent`/`frequent`).
-- Build the synthetic hierarchy (Search / Playlists).
+  `getPlaylist`, `getAlbumList2` (empty `recent`/`frequent`). ✅
+- Build the synthetic hierarchy (Search / Playlists). ✅ Playlist hits surface
+  as drill-in albums (`getAlbum`/`getPlaylist` on `pl:` ids); artist/album
+  catalog is intentionally empty (discovery via search).
 - **Exit test:** Amperfy shows browsable structure; playlists load and play.
+  ⏳ awaiting human test.
 
 ### Phase 3 — bonob (LAN, S1-style first if possible)
 
@@ -344,12 +354,24 @@ one is green.
 - Re-register service for S2; confirm Sonos cloud reaches bonob.
 - **Exit test:** play from Sonos app on S2 hardware.
 
-### Phase 5 — Polish
+### Phase 5 — Polish (code-able parts ✅ done)
 
-- now-playing/scrobble (accept gracefully; optionally feed a shim-side
-  "recently played"), cover art quality, favourites (shim-side storage),
-  transcode mode (b) for seeking, ffmpeg process-lifecycle hardening,
-  error envelopes for unplayable/region-locked videos, queue-ahead prefetch.
+- ✅ scrobble (accepts/no-ops; Hum has no history to write).
+- ✅ favourites — `star`/`unstar`/`getStarred2` over a shim-side JSON store
+  (`SHIM_DATA_DIR`), titles rendered from a recently-emitted cache (no
+  extraction).
+- ✅ cover-art sizing — `size` selects an `i.ytimg` variant (no decode/dep).
+- ✅ richer error envelopes — Hum 4xx (unplayable/region/live) → Subsonic 70,
+  5xx/transport (Hum down) → 0, instead of bare 500s.
+- ✅ ffmpeg lifecycle hardening — stderr logged on real failure; disconnect vs
+  failure distinguished via GeneratorExit/cancel, not returncode.
+- ✅ transcode mode (b) seeking — `SHIM_SEEKABLE_REMUX` materializes the remux
+  to a cached `+faststart` file served with Range. **Off by default** (adds
+  first-byte latency); flip on and validate during the Sonos phase.
+- **Queue-ahead prefetch — investigated, not built.** The per-track Subsonic
+  `stream` contract never exposes the next queue item to the shim, so there's
+  nothing to prefetch from; speculative warming would trigger expensive
+  extractions. The details cache (§5) remains the latency mitigation.
 - Possible later phase: "Radio" browse entry backed by `/api/radio` if live
   HLS → Sonos-safe stream proves workable.
 
@@ -388,10 +410,10 @@ Resolved by the codebase audit:
    as a fallback for Amperfy dev mode only. Treating auth as fully optional
    means bonob's credential handshake will silently fail.
 
-Still open (resolve before Phase 1):
-
-6. **Hierarchy scope:** Search-only first, or Search + Playlists at Phase 1?
-   (Recommend Search-only to reach "playable" fastest.)
+6. ~~Hierarchy scope~~ → **Search + Playlists.** search3 returns video songs +
+   playlist albums; `getAlbum`/`getPlaylist` expand a playlist's items. The
+   artist/album catalog (`getArtists`/`getAlbumList2`) is intentionally empty —
+   a search-centric source has no static library.
 
 -----
 
