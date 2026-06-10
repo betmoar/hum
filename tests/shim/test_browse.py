@@ -151,5 +151,5 @@ def test_get_cover_art_for_playlist(
 
 
 def test_browse_requires_auth(shim_client: TestClient) -> None:
-    r = shim_client.get("/rest/getMusicFolders")
+    r = shim_client.get("/rest/getMusicFolders", params={"f": "json"})
     assert r.json()["subsonic-response"]["status"] == "failed"

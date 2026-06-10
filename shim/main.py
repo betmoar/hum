@@ -5,14 +5,19 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 from shim import hum_client
 from shim.config import get_settings
 from shim.rest import router
 from shim.subsonic import MISSING_PARAMETER, SubsonicError, error_response
+
+
+def _request_format(request: Request) -> str:
+    # Read the format off the request directly: an exception may fire before
+    # the auth dependency set the ContextVar (e.g. param-validation errors).
+    return "json" if request.query_params.get("f") == "json" else "xml"
 
 
 @asynccontextmanager
@@ -35,13 +40,16 @@ def create_app() -> FastAPI:
     )
 
     @app.exception_handler(SubsonicError)
-    async def _handle_subsonic(_: Request, exc: SubsonicError) -> JSONResponse:
-        return error_response(exc.code, exc.message)
+    async def _handle_subsonic(request: Request, exc: SubsonicError) -> Response:
+        return error_response(exc.code, exc.message, fmt=_request_format(request))
 
     @app.exception_handler(RequestValidationError)
-    async def _handle_validation(_: Request, exc: RequestValidationError) -> JSONResponse:
+    async def _handle_validation(request: Request, exc: RequestValidationError) -> Response:
         # Subsonic clients expect protocol error 10, not an HTTP 422.
-        return error_response(MISSING_PARAMETER, "missing or invalid request parameter")
+        return error_response(
+            MISSING_PARAMETER, "missing or invalid request parameter",
+            fmt=_request_format(request),
+        )
 
     app.include_router(router)
 

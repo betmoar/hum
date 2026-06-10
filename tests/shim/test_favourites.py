@@ -77,5 +77,5 @@ def test_scrobble_is_accepted(
 
 
 def test_favourites_require_auth(shim_client: TestClient) -> None:
-    r = shim_client.get("/rest/getStarred2")
+    r = shim_client.get("/rest/getStarred2", params={"f": "json"})
     assert r.json()["subsonic-response"]["status"] == "failed"

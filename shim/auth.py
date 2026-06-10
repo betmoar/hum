@@ -12,7 +12,12 @@ import hmac
 from fastapi import Request
 
 from shim.config import ShimSettings, get_settings
-from shim.subsonic import MISSING_PARAMETER, WRONG_CREDENTIALS, SubsonicError
+from shim.subsonic import (
+    MISSING_PARAMETER,
+    WRONG_CREDENTIALS,
+    SubsonicError,
+    set_response_format,
+)
 
 _WRONG = "wrong username or password"
 
@@ -57,6 +62,9 @@ def check_credentials(
 
 
 async def require_subsonic_auth(request: Request) -> None:
-    """FastAPI dependency: every /rest endpoint authenticates, ping included."""
+    """FastAPI dependency: every /rest endpoint authenticates, ping included.
+    Also records the requested response format (runs before the handler, so
+    ok_response picks JSON vs XML correctly)."""
     q = request.query_params
+    set_response_format(q.get("f"))
     check_credentials(get_settings(), q.get("u"), q.get("p"), q.get("t"), q.get("s"))

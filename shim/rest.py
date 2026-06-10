@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from shim import hum_client, ids, mediacache, store, transcode
 from shim.auth import require_subsonic_auth
@@ -79,13 +79,13 @@ def _album_from_hit(hit: HumSearchHit) -> dict[str, Any]:
 
 @router.get("/ping")
 @router.get("/ping.view")
-async def ping() -> JSONResponse:
+async def ping() -> Response:
     return ok_response()
 
 
 @router.get("/getLicense")
 @router.get("/getLicense.view")
-async def get_license() -> JSONResponse:
+async def get_license() -> Response:
     return ok_response({"license": {"valid": True}})
 
 
@@ -94,7 +94,7 @@ async def get_license() -> JSONResponse:
 async def search3(
     query: str = Query(..., min_length=1, max_length=200),
     song_count: int = Query(20, alias="songCount", ge=1, le=50),
-) -> JSONResponse:
+) -> Response:
     hits = await hum_client.get_client().search(query, limit=song_count)
     songs = [
         _remember(_song_from_hit(h), "song")
@@ -115,13 +115,13 @@ async def search3(
 
 @router.get("/getMusicFolders")
 @router.get("/getMusicFolders.view")
-async def get_music_folders() -> JSONResponse:
+async def get_music_folders() -> Response:
     return ok_response({"musicFolders": {"musicFolder": [{"id": 0, "name": "Hum"}]}})
 
 
 @router.get("/getArtists")
 @router.get("/getArtists.view")
-async def get_artists() -> JSONResponse:
+async def get_artists() -> Response:
     # A search-centric source has no static artist catalog; discovery is the
     # search box plus playlist drill-in. A valid empty index, not a stub.
     return ok_response({"artists": {"ignoredArticles": "", "index": []}})
@@ -129,7 +129,7 @@ async def get_artists() -> JSONResponse:
 
 @router.get("/getIndexes")
 @router.get("/getIndexes.view")
-async def get_indexes() -> JSONResponse:
+async def get_indexes() -> Response:
     return ok_response(
         {"indexes": {"ignoredArticles": "", "lastModified": 0, "index": []}}
     )
@@ -141,7 +141,7 @@ async def get_album_list2(
     list_type: str = Query("newest", alias="type"),
     size: int = Query(10, ge=1, le=500),
     offset: int = Query(0, ge=0),
-) -> JSONResponse:
+) -> Response:
     # Hum has no catalog or play history (spec §3.2/§9.4), so recent/frequent/
     # newest/random are all empty; discovery happens through search.
     return ok_response({"albumList2": {"album": []}})
@@ -149,7 +149,7 @@ async def get_album_list2(
 
 @router.get("/getPlaylists")
 @router.get("/getPlaylists.view")
-async def get_playlists() -> JSONResponse:
+async def get_playlists() -> Response:
     # Hum can't enumerate playlists (no library); they're reached via search →
     # getPlaylist by id. Pinning would need shim-side storage (favourites).
     return ok_response({"playlists": {"playlist": []}})
@@ -157,7 +157,7 @@ async def get_playlists() -> JSONResponse:
 
 @router.get("/getPlaylist")
 @router.get("/getPlaylist.view")
-async def get_playlist(item_id: str = Query(..., alias="id")) -> JSONResponse:
+async def get_playlist(item_id: str = Query(..., alias="id")) -> Response:
     sid = ids.parse_id(item_id)
     if sid.kind != "playlist":
         raise SubsonicError(NOT_FOUND, "getPlaylist expects a pl: id")
@@ -178,7 +178,7 @@ async def get_playlist(item_id: str = Query(..., alias="id")) -> JSONResponse:
 
 @router.get("/getAlbum")
 @router.get("/getAlbum.view")
-async def get_album(item_id: str = Query(..., alias="id")) -> JSONResponse:
+async def get_album(item_id: str = Query(..., alias="id")) -> Response:
     sid = ids.parse_id(item_id)
     if sid.kind != "playlist":
         raise SubsonicError(NOT_FOUND, "getAlbum expects a pl: id")
@@ -245,7 +245,7 @@ def _starred2_lists() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 
 @router.get("/star")
 @router.get("/star.view")
-async def star(item_id: str = Query(..., alias="id")) -> JSONResponse:
+async def star(item_id: str = Query(..., alias="id")) -> Response:
     sid = ids.parse_id(item_id)
     kind = "song" if sid.kind == "video" else "album"
     seen = store.recall(item_id)
@@ -256,7 +256,7 @@ async def star(item_id: str = Query(..., alias="id")) -> JSONResponse:
 
 @router.get("/unstar")
 @router.get("/unstar.view")
-async def unstar(item_id: str = Query(..., alias="id")) -> JSONResponse:
+async def unstar(item_id: str = Query(..., alias="id")) -> Response:
     ids.parse_id(item_id)  # validate shape; unknown ids are a harmless no-op
     store.get_store().unstar(item_id)
     return ok_response()
@@ -264,14 +264,14 @@ async def unstar(item_id: str = Query(..., alias="id")) -> JSONResponse:
 
 @router.get("/getStarred2")
 @router.get("/getStarred2.view")
-async def get_starred2() -> JSONResponse:
+async def get_starred2() -> Response:
     songs, albums = _starred2_lists()
     return ok_response({"starred2": {"artist": [], "album": albums, "song": songs}})
 
 
 @router.get("/getStarred")
 @router.get("/getStarred.view")
-async def get_starred() -> JSONResponse:
+async def get_starred() -> Response:
     songs, albums = _starred2_lists()
     return ok_response({"starred": {"artist": [], "album": albums, "song": songs}})
 
@@ -281,7 +281,7 @@ async def get_starred() -> JSONResponse:
 async def scrobble(
     item_id: str = Query(..., alias="id"),
     submission: bool = Query(True),
-) -> JSONResponse:
+) -> Response:
     # Hum has no play history to write to (spec §9.4); accept gracefully so
     # bonob's now-playing/scrobble reports don't error.
     return ok_response()

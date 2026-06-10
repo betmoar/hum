@@ -33,7 +33,7 @@ def test_ping_wrong_token_fails_in_envelope(
 
 
 def test_ping_missing_user(shim_client: TestClient) -> None:
-    r = shim_client.get("/rest/ping")
+    r = shim_client.get("/rest/ping", params={"f": "json"})
     body = r.json()["subsonic-response"]
     assert body["status"] == "failed"
     assert body["error"]["code"] == 10
