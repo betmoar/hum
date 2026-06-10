@@ -312,6 +312,8 @@ one is green.
 ### Phase 1 — Auth + search + stream (minimum playable)
 
 - Implement `ping`, `getLicense`, `search3`, `stream`, `getCoverArt`.
+- Implement Subsonic token auth (`t`+`s` salted-MD5; plaintext `p` fallback
+  for dev) — bonob sends token auth by default (§9).
 - Implement the ID scheme (`vid:`/`pl:`/`art:`) with Hum's ID validation rules.
 - Implement live-hit filtering in `search3` (§3.4).
 - Implement the shim details cache (§5).
@@ -357,7 +359,7 @@ one is green.
 
 |Risk                                             |Likelihood|Impact|Mitigation                                                              |
 |-------------------------------------------------|----------|------|------------------------------------------------------------------------|
-|Remuxed AAC rejected by Sonos                    |Low-Med   |Med   |Validate with Amperfy first; fMP4 variant second; mp3 256k re-encode fallback|
+|Remuxed AAC rejected by Sonos                    |Low-Med   |Med   |Validate with Amperfy first; ADTS variant second; mp3 256k re-encode fallback|
 |Range requests break seeking                     |High      |Med   |Ship range-ignoring first; temp-file mode later                         |
 |ffmpeg process leaks                             |Med       |Med   |Tie process lifecycle to request (`body_iterator` pattern); reap on disconnect|
 |Cold-extraction first-byte latency (seconds)     |Med       |Med   |Shim details cache; queue-ahead prefetch; Hum single-flights extraction |
@@ -379,17 +381,17 @@ Resolved by the codebase audit:
 3. ~~Transcode format~~ → **AAC remux first, mp3 256k re-encode fallback** (§4).
 4. ~~History/Recently-played~~ → **Hum has none.** Omit at Phase 1/2; optional
    shim-side feature later (fed by `scrobble`).
+5. ~~Auth model~~ → **shim implements Subsonic token auth.** bonob sends
+   **salted-MD5 token auth** by default — `t` (MD5 hex of `password + s`) +
+   `s` (random salt). The shim must implement the token-auth hash check
+   (`MD5(password + salt)`). Plain `p` (password in clear/hex) is acceptable
+   as a fallback for Amperfy dev mode only. Treating auth as fully optional
+   means bonob's credential handshake will silently fail.
 
 Still open (resolve before Phase 1):
 
-5. **Hierarchy scope:** Search-only first, or Search + Playlists at Phase 1?
+6. **Hierarchy scope:** Search-only first, or Search + Playlists at Phase 1?
    (Recommend Search-only to reach "playable" fastest.)
-6. **Auth model:** bonob sends **salted-MD5 token auth** by default — `t`
-   (MD5 hex of `password + s`) + `s` (random salt). The shim must implement
-   the Subsonic token-auth hash check (`MD5(password + salt)`). Plain `p`
-   (password in clear/hex) is acceptable as a fallback for Amperfy dev mode
-   only. Treating auth as fully optional means bonob's credential handshake
-   will silently fail.
 
 -----
 
