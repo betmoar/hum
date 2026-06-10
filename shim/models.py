@@ -11,7 +11,24 @@ class HumSearchHit(BaseModel):
     author: str | None = None
     thumbnail_url: str = ""
     duration_seconds: int | None = None
+    video_count: int | None = None  # playlist hits only
     is_live: bool | None = None
+
+
+class HumPlaylistItem(BaseModel):
+    video_id: str
+    title: str
+    author: str | None = None
+    duration_seconds: int | None = None
+    thumbnail_url: str = ""
+
+
+class HumPlaylistInfo(BaseModel):
+    playlist_id: str
+    title: str
+    author: str | None = None
+    video_count: int = 0
+    items: list[HumPlaylistItem] = Field(default_factory=list)
 
 
 class HumAudioFormat(BaseModel):

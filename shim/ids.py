@@ -37,6 +37,14 @@ def video_id(ytid: str) -> str:
     return f"vid:{ytid}"
 
 
+def playlist_id(yt_playlist_id: str) -> str:
+    return f"pl:{yt_playlist_id}"
+
+
+def artist_id(channel_id: str) -> str:
+    return f"art:{channel_id}"
+
+
 def parse_id(raw: str) -> SubsonicId:
     prefix, sep, value = raw.partition(":")
     if not sep or prefix not in _PATTERNS:

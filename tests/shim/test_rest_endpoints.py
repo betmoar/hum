@@ -23,7 +23,7 @@ class FakeHumClient:
         assert self._details is not None
         return self._details
 
-    async def fetch_art(self, video_id: str) -> tuple[bytes, str]:
+    async def fetch_art(self, kind: str, value: str) -> tuple[bytes, str]:
         return b"jpeg-bytes", "image/jpeg"
 
     def absolute(self, signed_path: str) -> str:
