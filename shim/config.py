@@ -55,6 +55,14 @@ class ShimSettings(BaseSettings):
     # Shim-side state (favourites). Empty → DATA_DIR_DEFAULT (<repo>/.shim-data).
     data_dir: str = ""
 
+    # Seekable remux (spec §4 mode (b)): materialize the remuxed fMP4 to a
+    # cached temp file and serve it with Range support (gives Sonos a seek bar)
+    # at the cost of first-byte latency. Off by default — the streaming pipe
+    # (mode (a)) stays the default; flip on and validate during the Sonos phase.
+    seekable_remux: bool = False
+    temp_dir: str = ""  # empty → DATA_DIR_DEFAULT/cache
+    temp_cache_mb: int = 512
+
     # Details cache (spec §5): ttl = min(max_ttl, exp - now - safety)
     details_cache_max_ttl_seconds: float = 1800.0
     details_cache_safety_seconds: float = 60.0

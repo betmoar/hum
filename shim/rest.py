@@ -6,12 +6,13 @@ envelopes via the SubsonicError handler in shim.main.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from shim import hum_client, ids, store, transcode
+from shim import hum_client, ids, mediacache, store, transcode
 from shim.auth import require_subsonic_auth
 from shim.config import get_settings
 from shim.models import HumPlaylistItem, HumSearchHit, looks_live
@@ -288,7 +289,7 @@ async def scrobble(
 
 @router.get("/stream")
 @router.get("/stream.view")
-async def stream(item_id: str = Query(..., alias="id")) -> StreamingResponse:
+async def stream(item_id: str = Query(..., alias="id")) -> Response:
     sid = ids.parse_id(item_id)
     if sid.kind != "video":
         raise SubsonicError(NOT_FOUND, "only vid: ids are streamable")
@@ -296,13 +297,31 @@ async def stream(item_id: str = Query(..., alias="id")) -> StreamingResponse:
     details = await client.video_details(sid.value)
     fmt, mode = transcode.pick_audio_format(details.audio_formats)
     settings = get_settings()
+    input_url = client.absolute(fmt.url)
+
+    # Seekable mode (b): materialize the remux to a cached file and let
+    # Starlette serve it with Content-Length + Range (a Sonos seek bar). Falls
+    # back to the streaming pipe if materialization fails.
+    if mode == "remux" and settings.seekable_remux:
+
+        async def _produce(dest: Path) -> bool:
+            return await transcode.materialize(
+                transcode.remux_file_args(
+                    input_url, dest, ffmpeg_path=settings.ffmpeg_path
+                )
+            )
+
+        path = await mediacache.get_cache().get_or_produce(sid.value, _produce)
+        if path is not None:
+            return FileResponse(path, media_type="audio/mp4")
+
+    # Range-ignoring mode (a) from spec §4: stream straight through.
     args = transcode.ffmpeg_args(
-        client.absolute(fmt.url),
+        input_url,
         mode,
         ffmpeg_path=settings.ffmpeg_path,
         mp3_bitrate_kbps=settings.mp3_bitrate_kbps,
     )
-    # Range-ignoring mode (a) from spec §4: stream straight through.
     return StreamingResponse(
         transcode.stream_ffmpeg(args), media_type=transcode.media_type_for(mode)
     )

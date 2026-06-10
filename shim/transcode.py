@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Literal
 
 from shim.models import HumAudioFormat
@@ -46,6 +47,35 @@ def ffmpeg_args(
     if mode == "remux":
         return [*base, "-c:a", "copy", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "-"]
     return [*base, "-c:a", "libmp3lame", "-b:a", f"{mp3_bitrate_kbps}k", "-f", "mp3", "-"]
+
+
+def remux_file_args(input_url: str, dest: Path, *, ffmpeg_path: str) -> list[str]:
+    """Remux AAC to a complete .m4a file with the moov atom up front
+    (+faststart) so it serves cleanly under Range requests — distinct from the
+    fragmented, headerless container used for the streaming pipe."""
+    return [
+        ffmpeg_path, "-hide_banner", "-loglevel", "error",
+        "-i", input_url, "-vn", "-c:a", "copy", "-movflags", "+faststart",
+        str(dest),
+    ]
+
+
+async def materialize(args: list[str]) -> bool:
+    """Run ffmpeg to completion writing to a file (args end in the dest path).
+    Returns True on a clean exit; logs a stderr tail and returns False otherwise
+    so the caller can fall back to the streaming pipe."""
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        tail = (stderr or b"")[-_STDERR_TAIL_BYTES:].decode("utf-8", "replace").strip()
+        _log.warning("ffmpeg materialize exited %s: %s", proc.returncode, tail or "<no stderr>")
+        return False
+    return True
 
 
 async def stream_ffmpeg(args: list[str]) -> AsyncIterator[bytes]:
