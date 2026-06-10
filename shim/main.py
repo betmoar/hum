@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 
 from shim import hum_client
 from shim.config import get_settings
+from shim.radio import router as radio_router
 from shim.rest import router
 from shim.subsonic import MISSING_PARAMETER, SubsonicError, error_response
 
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(router)
+    app.include_router(radio_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:

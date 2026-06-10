@@ -60,6 +60,16 @@ def remux_file_args(input_url: str, dest: Path, *, ffmpeg_path: str) -> list[str
     ]
 
 
+def live_radio_args(manifest_url: str, *, ffmpeg_path: str, bitrate_kbps: int) -> list[str]:
+    """Read a live HLS manifest and emit a continuous mp3 stream for Sonos
+    internet radio (mp3 is the safe, universally-supported radio codec)."""
+    return [
+        ffmpeg_path, "-hide_banner", "-loglevel", "error",
+        "-i", manifest_url, "-vn",
+        "-c:a", "libmp3lame", "-b:a", f"{bitrate_kbps}k", "-f", "mp3", "-",
+    ]
+
+
 async def materialize(args: list[str]) -> bool:
     """Run ffmpeg to completion writing to a file (args end in the dest path).
     Returns True on a clean exit; logs a stderr tail and returns False otherwise

@@ -131,6 +131,23 @@ class HumClient:
                 self._art_urls[f"pl:{hit.id}"] = hit.thumbnail_url
         return hits
 
+    # ----- radio (live music streams) -------------------------------------
+
+    async def radio(self, limit: int) -> list[HumSearchHit]:
+        r = await self._get(self._hum, "/api/radio", params={"limit": limit})
+        _raise_for_hum_error(r)
+        return [HumSearchHit.model_validate(item) for item in r.json()["items"]]
+
+    async def live_manifest_url(self, video_id: str) -> str:
+        """Absolute, signed HLS manifest URL for a live video — ffmpeg input
+        for the radio stream. Raises NOT_FOUND if the video isn't live."""
+        r = await self._get(self._hum, f"/api/video/{video_id}")
+        _raise_for_hum_error(r)
+        details = HumVideoDetails.model_validate(r.json())
+        if not details.is_live or not details.live_stream_url:
+            raise SubsonicError(NOT_FOUND, f"{video_id} is not a live stream")
+        return self.absolute(details.live_stream_url)
+
     # ----- playlist -------------------------------------------------------
 
     async def playlist(self, playlist_id: str) -> HumPlaylistInfo:

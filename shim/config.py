@@ -47,6 +47,10 @@ class ShimSettings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8001
     debug: bool = False
+    # Base URL Sonos speakers use to fetch radio streams directly (must be
+    # LAN-reachable, e.g. http://192.168.1.10:8001). Empty → http://host:port,
+    # which only works if host isn't 127.0.0.1.
+    public_url: str = ""
 
     # Audio delivery (spec §4)
     ffmpeg_path: str = "ffmpeg"
@@ -79,6 +83,9 @@ class ShimSettings(BaseSettings):
 
     def pinned_playlist_ids(self) -> list[str]:
         return [p.strip() for p in self.pinned_playlists.split(",") if p.strip()]
+
+    def public_base_url(self) -> str:
+        return (self.public_url or f"http://{self.host}:{self.port}").rstrip("/")
 
 
 @lru_cache

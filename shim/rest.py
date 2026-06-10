@@ -230,6 +230,33 @@ async def get_album(item_id: str = Query(..., alias="id")) -> Response:
     )
 
 
+# ----- internet radio (spec §3.2 radio; backed by Hum /api/radio) -----------
+
+_RADIO_LIMIT = 20
+
+
+@router.get("/getInternetRadioStations")
+@router.get("/getInternetRadioStations.view")
+async def get_internet_radio_stations() -> Response:
+    # bonob surfaces these as a non-library "Internet Radio" shelf in Sonos.
+    # Each live music stream becomes a station whose streamUrl points back at
+    # the shim's (unauthenticated) /radio/{id} continuous-stream endpoint.
+    hits = await hum_client.get_client().radio(limit=_RADIO_LIMIT)
+    base = get_settings().public_base_url()
+    stations = [
+        {
+            "id": f"rad:{h.id}",
+            "name": h.title,
+            "streamUrl": f"{base}/radio/{h.id}",
+            "homePageUrl": f"https://www.youtube.com/watch?v={h.id}",
+        }
+        for h in hits
+    ]
+    return ok_response(
+        {"internetRadioStations": {"internetRadioStation": stations}}
+    )
+
+
 @router.get("/getCoverArt")
 @router.get("/getCoverArt.view")
 async def get_cover_art(

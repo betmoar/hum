@@ -341,6 +341,22 @@ one is green.
 - **Exit test:** Amperfy shows browsable structure; playlists load and play.
   ⏳ awaiting human test.
 
+**Sonos/bonob note (verified against bonob source).** bonob is a browse bridge,
+not a library-syncing client: it fetches from the shim on demand and Sonos keeps
+no persistent catalog, so `search3` results are **not** accumulated into a
+library (the DB-pollution seen in Amperfy does not occur on Sonos). bonob's
+top-level containers map to `getArtists`/`getAlbumList2`/`getGenres` (empty
+here — no catalog), `getStarred2` (Favourites ✅), `getPlaylists`, **Internet
+Radio** (`getInternetRadioStations`), and Search. The populated, non-polluting
+Sonos surfaces are therefore:
+- **Playlists** ✅ — `getPlaylists` returns `SHIM_PINNED_PLAYLISTS` + starred
+  `pl:` playlists (Hum can't enumerate; curated only).
+- **Internet Radio** ✅ (listing) — `getInternetRadioStations` maps Hum
+  `/api/radio` live streams to stations; `streamUrl` → the shim's
+  unauthenticated `/radio/{id}` mp3 pipe (needs `SHIM_PUBLIC_URL`).
+  ⚠️ **live-stream → Sonos-radio playback is unverified** (hardware gate).
+- **Favourites** ✅ — `getStarred2`.
+
 ### Phase 3 — bonob (LAN, S1-style first if possible)
 
 - Run bonob (Docker, pinned tag) pointed at the shim via `BNB_SUBSONIC_URL`.

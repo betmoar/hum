@@ -46,6 +46,8 @@ class HumVideoDetails(BaseModel):
     duration_seconds: int
     thumbnail_url: str = ""
     audio_formats: list[HumAudioFormat] = Field(default_factory=list)
+    is_live: bool = False
+    live_stream_url: str | None = None  # signed HLS manifest path (live only)
 
 
 def looks_live(hit: HumSearchHit) -> bool:
