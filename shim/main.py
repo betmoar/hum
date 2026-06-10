@@ -45,6 +45,13 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
 
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        # Subsonic clients (e.g. Amperfy's Auto-Detect) probe the base URL to
+        # confirm a server is there before hitting /rest/. A 404 here aborts
+        # that probe, so answer with a small liveness payload.
+        return {"service": "hum-subsonic-shim", "api": "/rest"}
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "healthy"}

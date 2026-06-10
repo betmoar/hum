@@ -50,3 +50,10 @@ def test_health_is_unauthenticated(shim_client: TestClient) -> None:
     r = shim_client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "healthy"}
+
+
+def test_root_is_not_404(shim_client: TestClient) -> None:
+    # Amperfy's Auto-Detect probes GET / before /rest/; a 404 aborts it.
+    r = shim_client.get("/")
+    assert r.status_code == 200
+    assert r.json()["api"] == "/rest"
