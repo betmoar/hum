@@ -33,10 +33,10 @@ jobs:
         run: uv sync --extra dev --python ${{ matrix.python }}
 
       - name: Lint (ruff)
-        run: uv run ruff check app/
+        run: uv run ruff check app/ shim/
 
       - name: Type-check (mypy --strict)
-        run: uv run mypy app/ --strict
+        run: uv run mypy app/ shim/ --strict
 
       - name: Test (pytest, unit only)
         # Integration tests hit live YouTube and are deselected by default

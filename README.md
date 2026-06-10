@@ -64,16 +64,20 @@ All `/api/*` endpoints require `Authorization: Bearer <API_BEARER_TOKEN>`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/search?q=...&limit=20` | Search videos |
+| GET | `/api/search?q=...&limit=20&category=music&live=false` | Search videos (optional music/live filters) |
+| GET | `/api/radio?limit=20` | Currently-live music streams (filtered live search) |
 | GET | `/api/video/{id}` | Video metadata + signed proxy URLs |
 | GET | `/api/channel/{id}` | Channel info |
 | GET | `/api/playlist/{id}` | Playlist with items |
+| GET | `/api/hls/{id}.m3u8?itag&exp&sig` | HLS byterange wrapper over fMP4/AAC audio (Safari seeking) |
+| GET | `/api/live/{id}/manifest.m3u8?exp&sig` | Proxied live-stream HLS playlist (rewritten segment URIs) |
 | GET | `/proxy/audio/{id}?itag&exp&sig` | Audio stream (signed, range-aware) |
 | GET | `/proxy/stream/{id}?itag&exp&sig` | Video stream (signed, range-aware) |
 | GET | `/proxy/thumbnail/{id}?itag=0&exp&sig` | Thumbnail (signed) |
+| GET | `/proxy/live-segment/{id}?u&exp&sig` | Live HLS segment proxy (signed, host-allowlisted) |
 | GET | `/health` | Health check |
 
-Proxy URLs are minted by `/api/video/{id}` — call it first, hand the returned URLs to your player.
+Proxy URLs are minted by `/api/video/{id}` — call it first, hand the returned URLs to your player. For AAC (`audio/mp4`) formats it additionally returns an `hls_url`; for live videos it returns a signed `live_stream_url` manifest. A bearer-protected `/api/debug/live/{id}/upstream` endpoint exposes the raw upstream playlists for live-stream debugging.
 
 ## Testing
 
@@ -118,8 +122,10 @@ app/
 ├── adapters/
 │   ├── youtube.py        Only file that imports pytubefix
 │   └── upstream_http.py  Shared httpx.AsyncClient + YouTube host allowlist
-├── api/                  GET routes: search, video, channel, playlist
-└── proxy/                GET routes: audio, video, thumbnail (range pass-through)
+├── api/                  GET routes: search, radio, video, channel, playlist, hls, live
+├── proxy/                GET routes: audio, video, thumbnail, live-segment (range pass-through)
+├── hls/                  sidx box parsing for the fMP4 byterange HLS wrapper
+└── live/                 HLS master/media playlist parsing + segment-URI rewriting
 ```
 
 ## Why pytubefix?
@@ -132,7 +138,7 @@ If pytubefix breaks (it eventually will), the fix lives in `app/adapters/youtube
 
 - Single uvicorn worker is correct at this scale (single user)
 - No rate limiting beyond the bearer token gate
-- In-memory stream URL cache only (5-min TTL); restart loses it
+- In-memory stream URL cache only (capped at 1h, bounded by YouTube's own `expire=`); restart loses it
 - Not for public deployment without further hardening
 - pytubefix is reverse-engineered; YouTube can break it without notice
 

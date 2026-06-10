@@ -119,6 +119,15 @@ app = create_app()
 
 
 def main() -> None:
+    import sys
+
+    # The `hum` script takes no subcommands; `hum shim` is a common slip — the
+    # shim has its own entry point. Fail loudly instead of silently starting Hum.
+    if len(sys.argv) > 1:
+        raise SystemExit(
+            f"hum: unknown argument {sys.argv[1]!r} — did you mean 'hum-shim'?"
+        )
+
     import uvicorn
 
     settings = get_settings()

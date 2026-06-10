@@ -41,9 +41,10 @@ dev = [
 
 [project.scripts]
 hum = "app.main:main"
+hum-shim = "shim.main:main"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "shim*"]
 
 [tool.ruff]
 line-length = 100
