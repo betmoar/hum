@@ -143,10 +143,14 @@ synthetic hierarchy up front:
 - A single video → model as a single-track "album" so it slots into Subsonic's
   album/track expectations.
 - **Live hits must be excluded.** `SearchHit.is_live` is unreliable from
-  pytubefix (often `None` for live streams); combine it with the duration
-  heuristic already proven in `app/api/radio.py:_looks_live` — treat
-  zero/missing duration as live and drop the hit. A "Radio" browse entry for
-  live streams is a possible later phase, not Phase 1/2.
+  pytubefix (often `None` for live streams); use the inverse of the heuristic
+  already proven in `app/api/radio.py:_looks_live` — zero/missing duration
+  means live, so drop the hit. Concretely:
+  ```python
+  results = [h for h in raw if not _looks_live(h)]
+  ```
+  (`radio.py` keeps hits where `_looks_live` is True; `search3` drops them.)
+  A "Radio" browse entry for live streams is a possible later phase, not Phase 1/2.
 
 Stable ID scheme is critical: Subsonic IDs must round-trip to YouTube IDs.
 Prefixing: `vid:<ytid>`, `pl:<ytplaylistid>`, `art:<channelid>` so the shim can
@@ -182,14 +186,21 @@ natively. So:
 ```
 Sonos GET /rest/stream?id=vid:<ytid>
   → shim calls Hum /api/video/<ytid>  (cached; picks audio format with codec=="aac")
-  → shim spawns:  ffmpeg -i <signed_proxy_url> -c:a copy -f adts -   (pipe)
-  → shim streams stdout to Sonos with Content-Type: audio/aac
+  → shim spawns:  ffmpeg -i <signed_proxy_url> -c:a copy -f mp4 -movflags frag_keyframe+empty_moov -   (pipe)
+  → shim streams stdout to Sonos with Content-Type: audio/mp4
 ```
 
 Near-zero CPU, no quality loss, first byte limited only by Hum URL resolution.
-The remux fixes the container (YouTube's DASH-style fMP4 → ADTS) without
-re-encoding. If ADTS gives Sonos trouble, `-f mp4 -movflags frag_keyframe+empty_moov`
-piped fMP4 is the second option before falling back to Mode 2.
+Fragmented MP4 (fMP4) is preferred over ADTS: it preserves the timing atom so
+Sonos can display track length and seek, and is the same container Hum's own
+HLS path produces (`app/api/hls.py`). ADTS is a secondary experiment — try it
+if fMP4 causes buffering issues, but expect no seek bar. Mode 2 is the last
+resort.
+
+**Mode 1 container preference order:**
+1. `-f mp4 -movflags frag_keyframe+empty_moov` → `Content-Type: audio/mp4` (start here)
+2. `-f adts` → `Content-Type: audio/aac` (try if fMP4 causes issues)
+3. Mode 2 (mp3 re-encode) if both AAC containers are rejected
 
 ### Mode 2 (fallback): mp3 re-encode
 
@@ -213,7 +224,7 @@ remuxed AAC in Amperfy/Sonos testing. mp3 CBR 256k, no exotic sample rates.
     remux is byte-cheap, a ranged request can be served by restarting the remux
     and discarding output up to the offset — still (a)-class simplicity with
     approximate seek support.
-- **Container/timing:** ADTS/mp3 over a chunked pipe generally works; some
+- **Container/timing:** fMP4/ADTS/mp3 over a chunked pipe generally works; some
   renderers want `Content-Length`. If Sonos balks, fall back to temp-file mode (b).
 - **Process lifecycle:** kill ffmpeg when Sonos disconnects (skip/stop) or you
   leak processes. Wire to the request lifecycle — follow the
@@ -238,7 +249,7 @@ Three clocks to keep straight:
 |-------------------------------------|-------------|--------------------|
 |Hum signed proxy URLs (`exp`/`sig`)  |6 h default (`STREAM_URL_TTL_SECONDS`)|minted by `/api/video/{id}`, per-itag|
 |Hum internal upstream-URL cache      |≤ 1 h, also capped by YouTube's `expire=`|inside `app/adapters/youtube.py`; transparent to the shim|
-|Shim details cache (to build)        |recommend ~30 min, always < remaining `exp`|shim-side|
+|Shim details cache (to build)        |`min(1800, exp − now − 60)` s|shim-side|
 
 - Hum mints signed proxy URLs per-itag with `exp`/`sig` query params. The
   **shim** consumes those internally and re-exposes its own `/stream` to Sonos
@@ -250,8 +261,9 @@ Three clocks to keep straight:
   queued playback.
 - **Cache `/api/video/{id}` responses in the shim** (metadata + signed URLs +
   signed thumbnail URL). This is what keeps `getCoverArt`, repeated `stream`
-  calls, and queue prefetch from hammering pytubefix extraction. Evict before
-  the signed URLs' `exp`.
+  calls, and queue prefetch from hammering pytubefix extraction. Evict each
+  entry using `ttl = min(1800, exp − now − 60)` — the 60 s safety margin
+  prevents serving an already-expired signed URL to ffmpeg mid-stream.
 - The shim holds Hum's `API_BEARER_TOKEN` server-side; it is never exposed to
   bonob/Sonos.
 
@@ -372,9 +384,12 @@ Still open (resolve before Phase 1):
 
 5. **Hierarchy scope:** Search-only first, or Search + Playlists at Phase 1?
    (Recommend Search-only to reach "playable" fastest.)
-6. **Auth model:** shim trusts LAN, or implements Subsonic token auth
-   (`t`+`s` salted-MD5) for bonob? (bonob will send credentials; decide
-   whether the shim validates or accepts.)
+6. **Auth model:** bonob sends **salted-MD5 token auth** by default — `t`
+   (MD5 hex of `password + s`) + `s` (random salt). The shim must implement
+   the Subsonic token-auth hash check (`MD5(password + salt)`). Plain `p`
+   (password in clear/hex) is acceptable as a fallback for Amperfy dev mode
+   only. Treating auth as fully optional means bonob's credential handshake
+   will silently fail.
 
 -----
 
