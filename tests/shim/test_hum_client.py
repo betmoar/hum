@@ -141,3 +141,20 @@ def test_upstream_5xx_maps_to_generic() -> None:
 
 def test_200_does_not_raise() -> None:
     _raise_for_hum_error(httpx.Response(200, json={"ok": True}))
+
+
+@pytest.mark.asyncio
+async def test_transport_error_becomes_subsonic_error() -> None:
+    # Hum down/unreachable must surface as a Subsonic error (failed envelope),
+    # not an unhandled httpx.RequestError → HTTP 500.
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    c = _client(httpx.MockTransport(boom))
+    try:
+        with pytest.raises(SubsonicError) as exc:
+            await c.search("anything", limit=5)
+        assert exc.value.code == GENERIC
+        assert "unreachable" in exc.value.message.lower()
+    finally:
+        await c.close()

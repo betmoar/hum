@@ -104,10 +104,21 @@ class HumClient:
         """Resolve a Hum-relative signed URL against the Hum base."""
         return urljoin(self._base_url + "/", signed_path.lstrip("/"))
 
+    async def _get(
+        self, client: httpx.AsyncClient, url: str, *, params: dict[str, str | int] | None = None
+    ) -> httpx.Response:
+        """GET that turns a transport failure (Hum down/unreachable) into a
+        Subsonic error envelope instead of letting httpx.RequestError escape as
+        a 500 — caught by the integration harness with Hum stopped."""
+        try:
+            return await client.get(url, params=params)
+        except httpx.RequestError as e:
+            raise SubsonicError(GENERIC, f"Hum unreachable: {e.__class__.__name__}") from e
+
     # ----- search -------------------------------------------------------
 
     async def search(self, q: str, limit: int) -> list[HumSearchHit]:
-        r = await self._hum.get("/api/search", params={"q": q, "limit": limit})
+        r = await self._get(self._hum, "/api/search", params={"q": q, "limit": limit})
         _raise_for_hum_error(r)
         hits = [HumSearchHit.model_validate(item) for item in r.json()["items"]]
         # Remember raw thumbnail URLs so getCoverArt never needs an extraction.
@@ -123,7 +134,7 @@ class HumClient:
     # ----- playlist -------------------------------------------------------
 
     async def playlist(self, playlist_id: str) -> HumPlaylistInfo:
-        r = await self._hum.get(f"/api/playlist/{playlist_id}")
+        r = await self._get(self._hum, f"/api/playlist/{playlist_id}")
         _raise_for_hum_error(r)
         info = HumPlaylistInfo.model_validate(r.json())
         # Remember item thumbnails so per-track getCoverArt stays extraction-free.
@@ -139,7 +150,7 @@ class HumClient:
         cached = self._details.get(video_id)
         if cached and cached[1] > now:
             return cached[0]
-        r = await self._hum.get(f"/api/video/{video_id}")
+        r = await self._get(self._hum, f"/api/video/{video_id}")
         _raise_for_hum_error(r)
         details = HumVideoDetails.model_validate(r.json())
         ttl = self._cache_ttl(details, now=now)
@@ -173,7 +184,7 @@ class HumClient:
             url, client = await self._playlist_art_source(value)
         else:
             raise SubsonicError(NOT_FOUND, f"no cover art for {kind} ids")
-        r = await client.get(_ytimg_variant(url, size))
+        r = await self._get(client, _ytimg_variant(url, size))
         if r.status_code != 200:
             raise SubsonicError(NOT_FOUND, f"cover art unavailable for {kind}:{value}")
         return r.content, r.headers.get("content-type", "image/jpeg")
