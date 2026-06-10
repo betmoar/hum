@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Anchor .env to the repo root (this file is <root>/app/config.py), not the
+# current working directory — launching from a subdir must not lose settings.
+_ENV_FILE = str(Path(__file__).resolve().parents[1] / ".env")
 
 
 class Settings(BaseSettings):
     """Single source of truth for runtime configuration."""
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, case_sensitive=False, extra="ignore")
 
     # App
     app_name: str = "Hum"

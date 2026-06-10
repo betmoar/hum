@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Anchor .env to the repo root (this file is <root>/shim/config.py), not the
+# current working directory — launching from a subdir must not lose settings.
+_ENV_FILE = str(Path(__file__).resolve().parents[1] / ".env")
 
 
 class ShimSettings(BaseSettings):
@@ -12,7 +17,7 @@ class ShimSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SHIM_",
-        env_file=".env",
+        env_file=_ENV_FILE,
         case_sensitive=False,
         extra="ignore",
         populate_by_name=True,

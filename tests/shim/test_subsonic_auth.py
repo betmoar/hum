@@ -19,7 +19,9 @@ def make_settings(**overrides: object) -> ShimSettings:
         "subsonic_password": _PASSWORD,
     }
     kwargs.update(overrides)
-    return ShimSettings(**kwargs)  # type: ignore[arg-type]
+    # _env_file=None: ignore the repo .env so these unit tests are hermetic
+    # (e.g. a dev's SHIM_ALLOW_PLAIN_PASSWORD=true must not leak into them).
+    return ShimSettings(_env_file=None, **kwargs)  # type: ignore[arg-type]
 
 
 def token_for(salt: str) -> str:
