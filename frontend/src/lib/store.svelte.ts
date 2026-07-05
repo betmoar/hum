@@ -70,9 +70,11 @@ class AppStore {
     musicOnly: loadString(KEY_MUSIC_ONLY) === 'false' ? false : true,
   });
   queue = $state<Track[]>(
-    // Stored audioUrl is signed with a TTL; on rehydrate it's almost certainly
-    // stale. Clear it so the Player will refetch via api.video on next play.
-    loadJson<Track[]>(KEY_QUEUE, []).map((t) => ({ ...t, audioUrl: '' }))
+    // Stored audioUrl/hlsUrl are signed with a TTL; on rehydrate they're almost
+    // certainly stale. Clear BOTH so the Player refetches via api.video on next
+    // play — a surviving hlsUrl makes pickVodSrc() return a dead URL on Safari
+    // and skips the rehydrate refetch entirely.
+    loadJson<Track[]>(KEY_QUEUE, []).map((t) => ({ ...t, audioUrl: '', hlsUrl: undefined }))
   );
   player = $state<PlayerState>({ current: null, isPlaying: false, positionSeconds: 0, shuffle: false, repeat: 'off', isExpanded: false });
   toast = $state<Toast | null>(null);
@@ -106,7 +108,10 @@ class AppStore {
       localStorage.setItem(KEY_MUSIC_ONLY, String(this.settings.musicOnly));
       const queueToPersist = this.queue.map((t) => {
         const { _formats, ...rest } = t;
-        return { ...rest, audioUrl: '', liveStreamUrl: undefined };
+        // Signed URLs must not be persisted: audioUrl, hlsUrl, liveStreamUrl
+        // all expire. If you add a new signed-URL field to Track, strip it
+        // here AND in the queue rehydrate map above.
+        return { ...rest, audioUrl: '', hlsUrl: undefined, liveStreamUrl: undefined };
       });
       localStorage.setItem(KEY_QUEUE, JSON.stringify(queueToPersist));
     } catch {

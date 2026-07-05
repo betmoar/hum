@@ -54,6 +54,10 @@ async def _get_master_and_audio_url(video_id: str) -> tuple[str, str, str]:
     master_url = await youtube.resolve_live_master_url(video_id)
     master_text, master_base = await upstream_http.fetch_text(master_url)
     audio_url = parse_master(master_text, base=master_base) or ""
+    # Evict expired entries on write so the cache can't grow unbounded over a
+    # long-running process (one stale entry per live video ever played).
+    for k in [k for k, v in _master_cache.items() if v[3] <= now]:
+        _master_cache.pop(k, None)
     _master_cache[video_id] = (master_text, master_base, audio_url, now + _MASTER_CACHE_TTL_S)
     return master_text, master_base, audio_url
 
@@ -119,8 +123,11 @@ async def debug_live_upstream(
 ) -> JSONResponse:
     """Debug-only — returns YouTube's raw master + media playlist content so we
     can inspect TARGETDURATION, sliding-window size, MEDIA-SEQUENCE, and any
-    directives causing Safari to misbehave. Bearer-protected. No signature
-    needed (read-only metadata, not for direct playback)."""
+    directives causing Safari to misbehave. Bearer-protected AND gated on
+    DEBUG=true: it exposes raw CDN URLs, which the signing scheme exists to
+    keep server-side (invariant #3)."""
+    if not get_settings().debug:
+        return _error(404, "NOT_FOUND", "debug endpoints are disabled")
     try:
         master_url = await youtube.resolve_live_master_url(video_id)
     except youtube.YouTubeError as e:

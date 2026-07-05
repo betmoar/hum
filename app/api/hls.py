@@ -39,7 +39,7 @@ _TARGET_SEGMENT_SECONDS = 60.0
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
     """Match the {error, message} response shape the rest of the API uses
-    via the HumError handler in app.main."""
+    (see the global exception handlers in app.main)."""
     return JSONResponse({"error": code, "message": message}, status_code=status)
 
 

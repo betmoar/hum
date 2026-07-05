@@ -27,6 +27,17 @@ def _is_youtube_host(host: str) -> bool:
     return any(host.endswith(s) for s in _ALLOWED_HOST_SUFFIXES)
 
 
+async def _enforce_allowlist_per_request(request: httpx.Request) -> None:
+    """Request event hook: runs for EVERY outgoing request, including each hop
+    of a redirect chain. Callers check the initial URL, but with
+    follow_redirects=True an upstream 3xx could otherwise send us to an
+    arbitrary host (SSRF via redirect). This hook makes that impossible.
+    """
+    host = request.url.host or ""
+    if not _is_youtube_host(host):
+        raise UpstreamHostError(f"host {host!r} not in allowlist (redirect target?)")
+
+
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
@@ -43,6 +54,7 @@ def _get_client() -> httpx.AsyncClient:
             ),
             limits=httpx.Limits(max_connections=s.upstream_pool_max),
             follow_redirects=True,
+            event_hooks={"request": [_enforce_allowlist_per_request]},
         )
     return _client
 

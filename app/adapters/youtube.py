@@ -10,10 +10,12 @@ import logging
 import re
 import time
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from pytubefix import Channel, Playlist, Search, YouTube
+from pytubefix import exceptions as pytubefix_exceptions
 
 try:
     from pytubefix.contrib.search import Filter as _SearchFilter
@@ -61,6 +63,30 @@ class YouTubeError(Exception):
         super().__init__(message)
 
 
+# pytubefix errors that mean "YouTube is refusing us", not "this video is gone".
+# Mapped to 503 so an operator can tell a blocking incident apart from dead links.
+_BLOCKED_ERROR_NAMES = frozenset(
+    {"BotDetection", "PoTokenRequired", "LoginRequired", "AgeCheckRequiredError",
+     "AgeCheckRequiredAccountError", "AgeRestrictedError", "SABRError"}
+)
+
+
+def _map_pytubefix_error(e: Exception) -> YouTubeError:
+    """Translate a pytubefix exception into a YouTubeError with a sane HTTP status.
+
+    Buckets:
+      - anti-bot / auth walls        -> 503 YOUTUBE_BLOCKED (operator: we are being blocked)
+      - VideoUnavailable subtree     -> 404 VIDEO_UNAVAILABLE (video gone/private/etc.)
+      - anything else from pytubefix -> 502 UPSTREAM_FAILURE (pytubefix broke / YouTube changed)
+    """
+    name = e.__class__.__name__
+    if name in _BLOCKED_ERROR_NAMES:
+        return YouTubeError(503, "YOUTUBE_BLOCKED", f"YouTube is blocking requests ({name})")
+    if isinstance(e, pytubefix_exceptions.VideoUnavailable):
+        return YouTubeError(404, "VIDEO_UNAVAILABLE", f"video unavailable ({name})")
+    return YouTubeError(502, "UPSTREAM_FAILURE", f"pytubefix failed ({name}: {e})")
+
+
 @dataclass(frozen=True)
 class LiveStreamInfo:
     """Adapter-internal shape for live-stream metadata. Never crosses the API boundary."""
@@ -96,6 +122,25 @@ def _make_playlist(playlist_id: str) -> Any:
 # ---- Public API ----------------------------------------------------------
 
 
+_T = TypeVar("_T")
+
+
+async def _to_thread_mapped(fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+    """asyncio.to_thread with pytubefix exceptions translated to YouTubeError.
+
+    Every pytubefix call MUST go through this (or swallow errors itself, like
+    `_fetch_live_manifest`). A raw PytubeFixError escaping the adapter turns
+    into a 500 at the route layer; YouTubeError turns into a clean 4xx/5xx via
+    the global handler in app.main.
+    """
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except YouTubeError:
+        raise
+    except pytubefix_exceptions.PytubeFixError as e:
+        raise _map_pytubefix_error(e) from e
+
+
 async def search(
     query: str,
     limit: int = 20,
@@ -109,29 +154,29 @@ async def search(
     if raw_filters is not None:
         wants_music = raw_filters.pop("_music_topic", False)
         pytubefix_filters = raw_filters if raw_filters else None
-    s = await asyncio.to_thread(_make_search, query, filters=pytubefix_filters)
+    s = await _to_thread_mapped(_make_search, query, filters=pytubefix_filters)
     if wants_music:
         # pytubefix's `Search.__init__` doesn't accept an `sp` kwarg; the encoded
         # filter protobuf lives on `s.filter` and is read at request time. Rebuild
         # it with the music-topic field merged in. On encoder failure, leave
         # `s.filter` untouched so the search degrades to type=Video + features.
         _inject_music_topic(s, pytubefix_filters)
-    return await asyncio.to_thread(_collect_search_hits, s, limit)
+    return await _to_thread_mapped(_collect_search_hits, s, limit)
 
 
 async def video(video_id: str) -> VideoDetails:
     # The construction + stream iteration both touch network + Node-cipher work,
     # so they MUST run off the event loop. Combining into one to_thread keeps the
     # event loop unblocked for concurrent requests.
-    return await asyncio.to_thread(_fetch_video, video_id)
+    return await _to_thread_mapped(_fetch_video, video_id)
 
 
 async def channel(channel_id: str) -> ChannelInfo:
-    return await asyncio.to_thread(_fetch_channel, channel_id)
+    return await _to_thread_mapped(_fetch_channel, channel_id)
 
 
 async def playlist(playlist_id: str) -> PlaylistInfo:
-    return await asyncio.to_thread(_fetch_playlist, playlist_id)
+    return await _to_thread_mapped(_fetch_playlist, playlist_id)
 
 
 async def resolve_upstream_url(video_id: str, itag: int) -> str:
@@ -196,7 +241,7 @@ async def _refresh_cache_once(video_id: str) -> None:
     if task is not None:
         await task
         return
-    task = asyncio.create_task(asyncio.to_thread(_refresh_cache, video_id))
+    task = asyncio.create_task(_to_thread_mapped(_refresh_cache, video_id))
     _inflight_refresh[video_id] = task
     try:
         await task

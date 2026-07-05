@@ -192,6 +192,23 @@ describe('AppStore', () => {
     }
   });
 
+  it('flush strips hlsUrl from persisted queue', async () => {
+    // hlsUrl is signed like audioUrl. If it survives persistence, Safari's
+    // pickVodSrc() returns the stale URL on rehydrate and the refetch effect
+    // never runs — playback dies with an expired-signature error.
+    const s = await freshStore();
+    s.enqueue({
+      videoId: 'hls', title: 't', author: 'a', durationSeconds: 100,
+      thumbnailUrl: '', audioUrl: '/proxy/audio/hls?sig=fresh', itag: 140,
+      hlsUrl: '/api/hls/hls.m3u8?sig=fresh',
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const parsed = JSON.parse(localStorage.getItem('hum.queue')!);
+    for (const track of parsed) {
+      expect(track.hlsUrl).toBeUndefined();
+    }
+  });
+
   it('expandPlayer sets isExpanded only if a track is current', async () => {
     const s = await freshStore();
     s.expandPlayer();
@@ -235,6 +252,24 @@ describe('AppStore', () => {
     const mod = await import('../../src/lib/store.svelte');
     expect(mod.store.queue.map((t) => t.videoId)).toEqual(['rehydrate-test']);
     expect(mod.store.queue[0].audioUrl).toBe('');
+  });
+
+  it('rehydrate strips hlsUrl from previously-persisted queue', async () => {
+    // Defense in depth for queues written by older builds that persisted
+    // hlsUrl: the load path must clear it even if the flush path missed it.
+    vi.resetModules();
+    localStorage.setItem(
+      'hum.queue',
+      JSON.stringify([
+        {
+          videoId: 'rehydrate-hls', title: 't', author: 'a', durationSeconds: 100,
+          thumbnailUrl: '', audioUrl: '', itag: 140,
+          hlsUrl: '/api/hls/rehydrate-hls.m3u8?sig=stale-from-disk',
+        },
+      ]),
+    );
+    const mod = await import('../../src/lib/store.svelte');
+    expect(mod.store.queue[0].hlsUrl).toBeUndefined();
   });
 });
 

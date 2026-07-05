@@ -20,6 +20,13 @@
     return t.audioUrl || undefined;
   }
 
+  // play() rejects under autoplay policy or when a load interrupts it; an
+  // uncaught rejection is console noise at best. Route every imperative play
+  // through here.
+  function safePlay(a: HTMLAudioElement | null) {
+    void a?.play().catch(() => { /* requires user gesture / interrupted */ });
+  }
+
   let el = $state<HTMLAudioElement | null>(null);
   let pos = $state(0);
   let dur = $state(0);
@@ -50,7 +57,9 @@
   }
 
   $effect(() => {
-    if (!el) return;
+    // Dev-only: 20 listeners + a console line per media event is diagnostic
+    // gold in DevTools and pure overhead in production.
+    if (!el || !import.meta.env.DEV) return;
     const a = el;
     const log = (ev: Event) =>
       console.log('[hum:audio]', ev.type, audioSnapshot(a));
@@ -85,11 +94,11 @@
       return;
     }
     playerControls.current = {
-      play:  () => { void el?.play(); },
+      play:  () => safePlay(el),
       pause: () => el?.pause(),
       toggle: () => {
         if (!el) return;
-        if (el.paused) void el.play(); else el.pause();
+        if (el.paused) safePlay(el); else el.pause();
       },
       seekBy: (delta) => {
         if (!el) return;
@@ -117,7 +126,7 @@
         artwork: t.thumbnailUrl ? [{ src: t.thumbnailUrl }] : [],
       });
       try {
-        navigator.mediaSession.setActionHandler('play',  () => el?.play());
+        navigator.mediaSession.setActionHandler('play',  () => safePlay(el));
         navigator.mediaSession.setActionHandler('pause', () => el?.pause());
         navigator.mediaSession.setActionHandler('nexttrack', () => store.next());
         navigator.mediaSession.setActionHandler('previoustrack', () => restart());
@@ -344,7 +353,7 @@
           onclick: () => {
             // Allow another recovery attempt and reload.
             recoveredVideoIds.delete(t.videoId);
-            if (el) { el.load(); void el.play(); }
+            if (el) { el.load(); safePlay(el); }
           },
         },
         0, // sticky — don't auto-dismiss the retry CTA
@@ -429,7 +438,7 @@
         {/if}
         <button
           class="ctrl ctrl-play"
-          onclick={() => paused ? el?.play() : el?.pause()}
+          onclick={() => paused ? safePlay(el) : el?.pause()}
           aria-label={paused ? 'Play' : 'Pause'}
         >
           {#if paused}

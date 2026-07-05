@@ -13,7 +13,12 @@
   let query = $state('');
   let recents = $state<string[]>(loadRecent());
 
+  // Monotonic request sequence: a slow early query must not overwrite the
+  // results of a faster later one (debounced typing fires overlapping calls).
+  let searchSeq = 0;
+
   async function onsubmit(q: string) {
+    const seq = ++searchSeq;
     query = q;
     loading = true;
     error = null;
@@ -21,13 +26,15 @@
     try {
       const opts = store.settings.musicOnly ? { category: 'music' as const } : undefined;
       const r = await api.search(q, 30, opts);
+      if (seq !== searchSeq) return; // superseded by a newer search
       items = r.items;
       // Only persist on successful submit (no point banking failed queries).
       recents = withRecent(recents, q);
     } catch (e) {
+      if (seq !== searchSeq) return;
       error = e instanceof Error ? e.message : 'Search failed';
     } finally {
-      loading = false;
+      if (seq === searchSeq) loading = false;
     }
   }
 
