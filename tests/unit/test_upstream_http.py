@@ -82,6 +82,7 @@ def test_is_allowed_host_rejects_other() -> None:
 def test_fetch_text_returns_body_and_base(monkeypatch) -> None:
     """fetch_text returns (text, base_url) where base_url is the URL after redirects."""
     import asyncio
+
     from app.adapters import upstream_http
 
     class FakeResponse:
@@ -103,7 +104,9 @@ def test_fetch_text_returns_body_and_base(monkeypatch) -> None:
 
 def test_fetch_text_rejects_disallowed_host() -> None:
     import asyncio
+
     import pytest
+
     from app.adapters import upstream_http
 
     with pytest.raises(upstream_http.UpstreamHostError):
@@ -112,7 +115,9 @@ def test_fetch_text_rejects_disallowed_host() -> None:
 
 def test_fetch_text_raises_on_non_2xx(monkeypatch) -> None:
     import asyncio
+
     import pytest
+
     from app.adapters import upstream_http
 
     class FakeResponse:

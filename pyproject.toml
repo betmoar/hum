@@ -55,6 +55,9 @@ select = ["E", "F", "I", "B", "UP", "N", "ANN", "SIM", "C4"]
 [tool.ruff.lint.per-file-ignores]
 # pytubefix is untyped; the adapter intentionally exposes Any across its boundary.
 "app/adapters/youtube.py" = ["ANN401"]
+# Tests: annotation rules are noise on fixtures/monkeypatch params; long lines
+# are usually literal fixture URLs/manifests. Everything else applies.
+"tests/**" = ["ANN", "E501"]
 
 [tool.ruff.format]
 quote-style = "double"

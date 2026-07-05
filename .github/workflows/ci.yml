@@ -32,8 +32,8 @@ jobs:
       - name: Install dependencies (locked)
         run: uv sync --extra dev --python ${{ matrix.python }}
 
-      - name: Lint (ruff)
-        run: uv run ruff check app/
+      - name: Lint (ruff, app + tests)
+        run: uv run ruff check .
 
       - name: Type-check (mypy --strict)
         run: uv run mypy app/ --strict

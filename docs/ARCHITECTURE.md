@@ -2,6 +2,11 @@
 
 Lean self-hosted YouTube proxy + lightweight Svelte 5 frontend. Single process, single binary deployment.
 
+> Maintainer entry points: [CLAUDE.md](../CLAUDE.md) (mental model, landmines, couplings),
+> [PLAYBOOKS.md](PLAYBOOKS.md) (step-by-step procedures), [BACKLOG.md](BACKLOG.md)
+> (known debt + residual risks). The invariants below are enforced by
+> `tests/unit/test_invariants.py`. Pre-push gate: `./scripts/check.sh`.
+
 ## Overview
 
 ```
@@ -90,7 +95,7 @@ Svelte 5 + Vite + TypeScript single-page app.
 frontend/src/
 ├── main.ts                  bootstrap
 ├── App.svelte               Setup gate + nav + router outlet + Player
-├── routes.ts                ~25-LOC hand-rolled hash router
+├── routes.svelte.ts         hand-rolled hash router (Svelte 5 runes)
 ├── app.css                  CSS vars + base reset
 ├── lib/
 │   ├── api.ts               Single fetch site; injects bearer; 401 invalidates
@@ -183,9 +188,9 @@ docker run -p 8000:8000 --env-file .env hum
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Backend unit | `pytest tests/unit` | 49 tests; mocked InnerTube boundary; auth, config, range, models, routes |
+| Backend unit | `pytest tests/unit` | mocked pytubefix boundary; auth, config, range, models, routes, invariants |
 | Backend integration | `pytest -m integration` | 5 tests; hits real YouTube; opt-in |
-| Frontend unit + component | `cd frontend && npm test` | 42 tests; mocked fetch + adapter; runes, API, store, components |
+| Frontend unit + component | `cd frontend && npm test` | mocked fetch + adapter; runes, API, store, components |
 
 All three suites currently green. `ruff check app` and `mypy app` both clean. `svelte-check` reports 0 errors.
 
@@ -202,6 +207,5 @@ All three suites currently green. `ruff check app` and `mypy app` both clean. `s
 - Gapless playback / crossfade
 - Equalizer / visualizer
 - Video playback in the UI (proxy exists; UI doesn't surface it)
-- CI pipeline / GitHub Actions
 - Codegen for TS types from Pydantic
 - Workspace tooling (npm/pnpm workspaces)

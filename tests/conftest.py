@@ -5,7 +5,6 @@ import os
 
 import pytest
 
-
 # Pre-populate env vars required by Settings before any test imports app modules
 _TEST_BEARER_TOKEN = "test-bearer-token"
 _TEST_SIGNING_KEY = "00" * 32

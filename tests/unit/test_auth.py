@@ -86,8 +86,9 @@ def test_sign_format_url_round_trip(signing_key_hex: str) -> None:
 
 
 def test_sign_and_verify_live_manifest_roundtrip(signing_key_hex) -> None:
-    from app.auth import sign_live_manifest_url, verify_live_manifest_signature
     import urllib.parse
+
+    from app.auth import sign_live_manifest_url, verify_live_manifest_signature
 
     key = bytes.fromhex(signing_key_hex)
     path = "/api/live/abc12345678/manifest.m3u8"
@@ -100,9 +101,11 @@ def test_sign_and_verify_live_manifest_roundtrip(signing_key_hex) -> None:
 
 
 def test_verify_live_manifest_signature_rejects_tampered(signing_key_hex) -> None:
-    import pytest
-    from app.auth import SignatureError, sign_live_manifest_url, verify_live_manifest_signature
     import urllib.parse
+
+    import pytest
+
+    from app.auth import SignatureError, sign_live_manifest_url, verify_live_manifest_signature
 
     key = bytes.fromhex(signing_key_hex)
     path = "/api/live/abc12345678/manifest.m3u8"
@@ -116,9 +119,11 @@ def test_verify_live_manifest_signature_rejects_tampered(signing_key_hex) -> Non
 
 
 def test_verify_live_manifest_signature_rejects_expired(signing_key_hex) -> None:
-    import pytest
-    from app.auth import SignatureError, sign_live_manifest_url, verify_live_manifest_signature
     import urllib.parse
+
+    import pytest
+
+    from app.auth import SignatureError, sign_live_manifest_url, verify_live_manifest_signature
 
     key = bytes.fromhex(signing_key_hex)
     path = "/api/live/abc12345678/manifest.m3u8"
@@ -132,8 +137,9 @@ def test_verify_live_manifest_signature_rejects_expired(signing_key_hex) -> None
 
 
 def test_sign_and_verify_live_segment_roundtrip(signing_key_hex) -> None:
-    from app.auth import sign_live_segment_url, verify_live_segment_signature
     import urllib.parse
+
+    from app.auth import sign_live_segment_url, verify_live_segment_signature
 
     key = bytes.fromhex(signing_key_hex)
     path = "/proxy/live-segment/abc12345678"
@@ -147,9 +153,11 @@ def test_sign_and_verify_live_segment_roundtrip(signing_key_hex) -> None:
 
 
 def test_verify_live_segment_signature_rejects_tampered_u(signing_key_hex) -> None:
-    import pytest
-    from app.auth import SignatureError, sign_live_segment_url, verify_live_segment_signature
     import urllib.parse
+
+    import pytest
+
+    from app.auth import SignatureError, sign_live_segment_url, verify_live_segment_signature
 
     key = bytes.fromhex(signing_key_hex)
     path = "/proxy/live-segment/abc12345678"
