@@ -201,6 +201,19 @@ async def resolve_upstream_url(video_id: str, itag: int) -> str:
     return cached[0]
 
 
+def evict_stream_url(video_id: str, itag: int) -> None:
+    """Drop a single (video_id, itag) cache entry.
+
+    Used by the proxy's evict-and-retry-once flow on upstream 403/410 (see
+    app/proxy/_common.py) — YouTube can invalidate a cached CDN URL early (IP
+    change), and retrying with the same stale entry just repeats the 403.
+    A single dict.pop is GIL-atomic, consistent with the cache-mutation rules
+    in docs/PLAYBOOKS.md §4 (writers run in asyncio.to_thread workers, readers
+    on the event loop — no compound read-modify-write).
+    """
+    _stream_url_cache.pop((video_id, itag), None)
+
+
 async def resolve_live_master_url(video_id: str) -> str:
     """Return the YouTube master HLS URL for a live video.
 

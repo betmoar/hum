@@ -3,6 +3,7 @@ and a factory for signed-stream proxy routers (audio + video).
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
@@ -13,6 +14,14 @@ from app.adapters import upstream_http, youtube
 from app.auth import SignatureError, verify_signature
 from app.config import get_settings
 from app.models import VideoID
+
+logger = logging.getLogger("hum.proxy")
+
+# Upstream statuses that mean "the cached CDN URL is stale" (not "the itag is
+# gone"). YouTube can invalidate a cached URL early (IP change); retrying with
+# the same stale URL just repeats the failure, so on these we evict the cache
+# entry and re-resolve once. Bounded: see stream_proxy's single `if` below.
+_RETRIABLE_UPSTREAM_STATUSES = frozenset({403, 410})
 
 # RFC 7230 §6.1 hop-by-hop headers + a few cookie/server fingerprints we
 # don't want to leak from the upstream (YouTube) to our API clients.
@@ -89,6 +98,16 @@ def create_signed_stream_router(
             upstream_headers["Range"] = rng
 
         resp = await upstream_http.open_stream(upstream_url, headers=upstream_headers)
+        if resp.status_code in _RETRIABLE_UPSTREAM_STATUSES:
+            await resp.aclose()
+            logger.info(
+                "upstream %d for %s itag=%d; evicting cached stream URL and retrying once",
+                resp.status_code, video_id, itag,
+            )
+            youtube.evict_stream_url(video_id, itag)
+            upstream_url = await youtube.resolve_upstream_url(video_id, itag)
+            resp = await upstream_http.open_stream(upstream_url, headers=upstream_headers)
+
         return StreamingResponse(
             body_iterator(resp),
             status_code=resp.status_code,

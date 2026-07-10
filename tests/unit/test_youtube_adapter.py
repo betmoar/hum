@@ -157,6 +157,20 @@ def test_evict_expired_removes_stale_keeps_live() -> None:
     assert ("vidB", 2) in adapter._stream_url_cache
 
 
+def test_evict_stream_url_removes_only_target_entry() -> None:
+    adapter._stream_url_cache[("vidA", 140)] = ("https://x/1", time.time() + 100)
+    adapter._stream_url_cache[("vidA", 251)] = ("https://x/2", time.time() + 100)
+
+    adapter.evict_stream_url("vidA", 140)
+
+    assert ("vidA", 140) not in adapter._stream_url_cache
+    assert ("vidA", 251) in adapter._stream_url_cache
+
+
+def test_evict_stream_url_missing_key_is_noop() -> None:
+    adapter.evict_stream_url("nope", 999)  # must not raise
+
+
 async def test_concurrent_resolve_dedupes_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
