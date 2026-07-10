@@ -38,9 +38,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     LOG_LEVEL=INFO
 
+# Documents the default; does not enforce it — actual bind port follows $PORT (see ENV above).
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8000/health || exit 1
+  CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT:-8000}/health" || exit 1'
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# "hum" is the console script from pyproject.toml [project.scripts]; it calls
+# app.main:main(), which is the only place that reads settings.host/settings.port
+# (HOST/PORT env vars). If that entry point is ever renamed, this breaks silently.
+CMD ["hum"]

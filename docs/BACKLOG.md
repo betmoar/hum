@@ -59,10 +59,6 @@ in the 2026-07 audit were fixed (see `tests/unit/test_audit_regressions.py`).
 - **Structured logs for the 3am case.** `hum.access` logs path + status; add the error
   code (`YOUTUBE_BLOCKED` etc.) to the log line on 5xx so `docker logs | grep` tells
   the story without a debugger.
-- **Docker healthcheck vs PORT.** `Dockerfile` CMD hardcodes `--port 8000` and the
-  healthcheck pings 8000; the `PORT` env var is decorative in-container. Either honor
-  it (`CMD ["python", "-m", "app.main"]` reads settings) or delete the env to stop it
-  lying.
 - **README badge + CHANGELOG compare links still point at `betmoar/streamtube`.**
   Repo is `betmoar/hum`. Cosmetic; fix when touching docs. (Badge fixed in audit if
   you're reading this after 2026-07; links in CHANGELOG footer remain.)
