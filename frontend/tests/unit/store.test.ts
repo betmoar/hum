@@ -130,6 +130,43 @@ describe('AppStore', () => {
     expect(s.queue.map((x) => x.videoId)).toEqual(['z', 'a', 'b']);
   });
 
+  it('enqueue assigns a stable queueId to each track', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    s.enqueue(t('a')); // same videoId enqueued twice — exactly what queueId disambiguates
+    const ids = s.queue.map((x) => x.queueId);
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it('playNext assigns a queueId', async () => {
+    const s = await freshStore();
+    s.playNext(t('z'));
+    expect(s.queue[0].queueId).toBeTruthy();
+  });
+
+  it('reorder preserves each track\'s queueId (not just position)', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    s.enqueue(t('b'));
+    s.enqueue(t('c'));
+    const idsBefore = s.queue.map((x) => x.queueId);
+    s.reorder(0, 2);
+    const idsAfter = s.queue.map((x) => x.queueId);
+    expect(idsAfter).toEqual([idsBefore[1], idsBefore[2], idsBefore[0]]);
+  });
+
+  it('queueId survives persistence and rehydrate (not stripped)', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    const idBefore = s.queue[0].queueId;
+    await new Promise((r) => setTimeout(r, 250));
+    const raw = localStorage.getItem('hum.queue');
+    const parsed = JSON.parse(raw!);
+    expect(parsed[0].queueId).toBe(idBefore);
+  });
+
   it('toggleShuffle flips shuffle', async () => {
     const s = await freshStore();
     expect(s.player.shuffle).toBe(false);

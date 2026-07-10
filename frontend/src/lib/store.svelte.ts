@@ -137,11 +137,11 @@ class AppStore {
   }
 
   enqueue(t: Track): void {
-    this.queue = [...this.queue, t];
+    this.queue = [...this.queue, { ...t, queueId: t.queueId ?? crypto.randomUUID() }];
   }
 
   playNext(t: Track): void {
-    this.queue = [t, ...this.queue];
+    this.queue = [{ ...t, queueId: t.queueId ?? crypto.randomUUID() }, ...this.queue];
   }
 
   playNow(t: Track): void {

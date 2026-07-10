@@ -109,4 +109,9 @@ export type Track = {
   // Signed /api/live/{id}/manifest.m3u8 URL for live tracks. Empty/undefined
   // for VOD. Stripped on persistence (see store.svelte.ts #flush).
   liveStreamUrl?: string;
+  // Stable per-insertion id for {#each} keying — NOT the video id (a track
+  // can appear in the queue more than once). Assigned once at enqueue time
+  // in store.svelte.ts; never sent to/received from the backend, so no
+  // Python mirror is needed (see the "Frontend-only type" comment above).
+  queueId?: string;
 };

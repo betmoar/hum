@@ -36,10 +36,6 @@ in the 2026-07 audit were fixed (see `tests/unit/test_audit_regressions.py`).
   that leaks if the event never fires. Route it through the `playerControls` handle
   instead (it already exposes imperative controls; add `getElement()` or a
   `restoreAt(pos)` method).
-- **Queue keying churn.** `Queue.svelte` keys `{#each}` by `videoId + ':' + i`, so
-  reorder/remove rebuilds shifted rows. Give `Track` a stable per-insertion `queueId`
-  (crypto.randomUUID() at enqueue) and key by that. Touches `store.enqueue`/`playNext`
-  and persistence (strip nothing — it's inert).
 - **Search input debounce banks partial queries into recents.** Split
   `onsubmit`-with-recents from debounced-preview-search in `Search.svelte` so only
   Enter/explicit submits call `withRecent`.
