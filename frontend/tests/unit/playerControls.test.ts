@@ -20,6 +20,7 @@ describe('playerControls', () => {
       setVolume: () => {},
       toggleMute: () => {},
       getPosition: () => 0,
+      restoreAt: () => {},
     };
     playerControls.current = fake;
     expect(playerControls.current).toBe(fake);
@@ -32,8 +33,22 @@ describe('playerControls', () => {
       play: () => {}, pause: () => {}, toggle: () => {},
       seekBy: () => {}, setVolume: () => {}, toggleMute: () => {},
       getPosition: () => 42,
+      restoreAt: () => {},
     };
     playerControls.current = fake;
     expect(playerControls.current!.getPosition!()).toBe(42);
+  });
+
+  it('restoreAt is callable with a position', () => {
+    let restored: number | null = null;
+    const fake = {
+      play: () => {}, pause: () => {}, toggle: () => {},
+      seekBy: () => {}, setVolume: () => {}, toggleMute: () => {},
+      getPosition: () => 0,
+      restoreAt: (pos: number) => { restored = pos; },
+    };
+    playerControls.current = fake;
+    playerControls.current!.restoreAt!(12.5);
+    expect(restored).toBe(12.5);
   });
 });

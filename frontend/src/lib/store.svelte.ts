@@ -15,6 +15,7 @@ export type PlayerControls = {
   setVolume: (v: number) => void;
   toggleMute: () => void;
   getPosition?: () => number;
+  restoreAt?: (pos: number) => void;
 };
 
 // Module-level non-reactive ref — NOT $state. Components write .current on
@@ -361,14 +362,7 @@ class AppStore {
         qualityTier: tier,
         _formats: fresh.audio_formats,
       };
-      const audio = document.querySelector('audio') as HTMLAudioElement | null;
-      if (audio) {
-        audio.addEventListener(
-          'loadedmetadata',
-          () => { audio.currentTime = lastPos; },
-          { once: true },
-        );
-      }
+      playerControls.current?.restoreAt?.(lastPos);
     } catch {
       if (token === this.#qualitySwitchToken) {
         this.notify('Could not switch quality.', 'error');

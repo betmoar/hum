@@ -108,6 +108,16 @@
       setVolume: (v) => { if (el) el.volume = Math.max(0, Math.min(1, v)); },
       toggleMute: () => { if (el) el.muted = !el.muted; },
       getPosition: () => el?.currentTime ?? 0,
+      restoreAt: (pos: number) => {
+        const a = el;
+        if (!a) return;
+        if (a.readyState >= 1 /* HAVE_METADATA */) {
+          a.currentTime = pos;
+          return;
+        }
+        const onMeta = () => { a.currentTime = pos; };
+        a.addEventListener('loadedmetadata', onMeta, { once: true });
+      },
     };
     return () => { playerControls.current = null; };
   });

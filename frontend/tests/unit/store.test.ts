@@ -12,7 +12,12 @@ const t = (id: string): Track => ({
   itag: 140,
 });
 
-// Helper to get a fresh store instance per test by re-importing.
+// Helper to get a fresh store instance per test by re-importing. Some tests
+// in this file call vi.resetModules() (see the rehydrate tests below), which
+// makes this dynamic import return a NEW module instance — with its own
+// `playerControls` singleton, distinct from the one bound by any static
+// top-of-file import. Callers that need `playerControls` for the currently
+// active store MUST get it from this same import, not a static import.
 async function freshStore() {
   const mod = await import('../../src/lib/store.svelte');
   mod.store.clear();
@@ -380,6 +385,50 @@ describe('AppStore.switchQuality', () => {
     const spy = vi.spyOn(apiMod.api, 'video');
     await s.switchQuality('hi');
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('calls playerControls.restoreAt with the captured position instead of touching the DOM', async () => {
+    // NOTE: playerControls must come from the SAME dynamic module instance as
+    // `s` (see freshStore() comment) — the rehydrate tests above call
+    // vi.resetModules(), so the static top-of-file `playerControls` import
+    // may be bound to a stale module instance whose `switchQuality` never
+    // observes writes to it.
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const pc = mod.playerControls;
+    s.setToken('t');
+    s.player.current = {
+      videoId: 'abc', title: 'T', author: 'A', durationSeconds: 100,
+      thumbnailUrl: '', audioUrl: '/proxy/audio/abc?itag=251', itag: 251,
+      qualityTier: 'hi', isLive: false,
+    } as any;
+
+    const restoreAt = vi.fn();
+    const getPosition = vi.fn(() => 37);
+    pc.current = {
+      play: () => {}, pause: () => {}, toggle: () => {},
+      seekBy: () => {}, setVolume: () => {}, toggleMute: () => {},
+      getPosition, restoreAt,
+    };
+
+    const fakeDetails = {
+      video_id: 'abc', title: 'T', author: 'A', channel_id: 'c',
+      duration_seconds: 100, thumbnail_url: '',
+      audio_formats: [
+        { itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus', url: '/proxy/audio/abc?itag=251' },
+        { itag: 249, mime_type: 'audio/webm; codecs="opus"', bitrate: 50000, codec: 'opus', url: '/proxy/audio/abc?itag=249' },
+      ],
+      video_formats: [],
+    };
+    const apiMod = await import('../../src/lib/api');
+    vi.spyOn(apiMod.api, 'video').mockResolvedValue(fakeDetails as any);
+
+    await s.switchQuality('low');
+
+    expect(getPosition).toHaveBeenCalled();
+    expect(restoreAt).toHaveBeenCalledWith(37);
+
+    pc.current = null;
   });
 });
 

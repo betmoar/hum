@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Player from '../../src/components/Player.svelte';
-import { store } from '../../src/lib/store.svelte';
+import { store, playerControls } from '../../src/lib/store.svelte';
 import type { Track, AudioFormat } from '../../src/lib/types';
 
 const sampleTrack = (id: string, audioUrl: string): Track => ({
@@ -42,6 +42,17 @@ describe('Player', () => {
     const audio = container.querySelector('audio') as HTMLAudioElement | null;
     expect(audio).not.toBeNull();
     expect(audio!.src).toContain('/proxy/audio/xyz');
+  });
+
+  it('playerControls.restoreAt seeks to position once metadata loads', async () => {
+    store.playNow(sampleTrack('seek', '/proxy/audio/seek?itag=140&exp=1&sig=' + 'c'.repeat(32)));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    playerControls.current!.restoreAt!(42);
+    Object.defineProperty(audio, 'currentTime', { value: 0, writable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(audio.currentTime).toBe(42);
   });
 
   it('"ended" event advances queue', async () => {
