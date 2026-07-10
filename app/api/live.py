@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import time
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.adapters import upstream_http, youtube
@@ -35,7 +35,10 @@ _master_cache: dict[str, tuple[str, str, str, float]] = {}
 # Mapping video_id -> (master_text, master_base, audio_url, expiry_epoch)
 
 
-def _error(status: int, code: str, message: str) -> JSONResponse:
+def _error(request: Request, status: int, code: str, message: str) -> JSONResponse:
+    # Stash the code on request.state so the access-log middleware in
+    # app/main.py appends code=<CODE>; response body/status are unchanged.
+    request.state.error_code = code
     return JSONResponse({"error": code, "message": message}, status_code=status)
 
 
@@ -64,6 +67,7 @@ async def _get_master_and_audio_url(video_id: str) -> tuple[str, str, str]:
 
 @router.get("/live/{video_id}/manifest.m3u8", response_model=None)
 async def live_manifest(
+    request: Request,
     video_id: str = Path(..., min_length=11, max_length=11, pattern=r"^[A-Za-z0-9_-]{11}$"),
     exp: int = Query(...),
     sig: str = Query(..., min_length=32, max_length=32),
@@ -74,22 +78,22 @@ async def live_manifest(
     try:
         verify_live_manifest_signature(path, exp=exp, sig=sig, key=key)
     except SignatureError as e:
-        return _error(e.status, "BAD_SIGNATURE", e.message)
+        return _error(request, e.status, "BAD_SIGNATURE", e.message)
 
     try:
         _master_text, _master_base, audio_url = await _get_master_and_audio_url(video_id)
     except youtube.YouTubeError as e:
-        return _error(e.status, e.code, e.message)
+        return _error(request, e.status, e.code, e.message)
     except UpstreamStatusError as e:
-        return _error(502, "UPSTREAM_ERROR", f"master fetch failed: {e.status}")
+        return _error(request, 502, "UPSTREAM_ERROR", f"master fetch failed: {e.status}")
 
     if not audio_url:
-        return _error(502, "MALFORMED_MANIFEST", "no audio rendition in master")
+        return _error(request, 502, "MALFORMED_MANIFEST", "no audio rendition in master")
 
     try:
         media_text, media_base = await upstream_http.fetch_text(audio_url)
     except UpstreamStatusError as e:
-        return _error(502, "UPSTREAM_ERROR", f"media fetch failed: {e.status}")
+        return _error(request, 502, "UPSTREAM_ERROR", f"media fetch failed: {e.status}")
 
     def segment_url_builder(upstream_seg_url: str) -> str:
         u = base64.urlsafe_b64encode(upstream_seg_url.encode()).decode().rstrip("=")
@@ -119,6 +123,7 @@ async def live_manifest(
     dependencies=[Depends(require_bearer)],
 )
 async def debug_live_upstream(
+    request: Request,
     video_id: str = Path(..., min_length=11, max_length=11, pattern=r"^[A-Za-z0-9_-]{11}$"),
 ) -> JSONResponse:
     """Debug-only — returns YouTube's raw master + media playlist content so we
@@ -127,15 +132,15 @@ async def debug_live_upstream(
     DEBUG=true: it exposes raw CDN URLs, which the signing scheme exists to
     keep server-side (invariant #3)."""
     if not get_settings().debug:
-        return _error(404, "NOT_FOUND", "debug endpoints are disabled")
+        return _error(request, 404, "NOT_FOUND", "debug endpoints are disabled")
     try:
         master_url = await youtube.resolve_live_master_url(video_id)
     except youtube.YouTubeError as e:
-        return _error(e.status, e.code, e.message)
+        return _error(request, e.status, e.code, e.message)
     try:
         master_text, master_base = await upstream_http.fetch_text(master_url)
     except UpstreamStatusError as e:
-        return _error(502, "UPSTREAM_ERROR", f"master fetch failed: {e.status}")
+        return _error(request, 502, "UPSTREAM_ERROR", f"master fetch failed: {e.status}")
     audio_url = parse_master(master_text, base=master_base)
     media_text: str | None = None
     media_base: str | None = None
