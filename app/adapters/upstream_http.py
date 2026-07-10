@@ -149,7 +149,14 @@ async def fetch_range(url: str, *, start: int, end: int) -> bytes:
         # abort as soon as we exceed the limit, so a lying/absent header
         # can't force a full-file buffer either.
         content_length = resp.headers.get("content-length")
-        declared = int(content_length) if content_length is not None else None
+        try:
+            declared = int(content_length) if content_length is not None else None
+        except ValueError:
+            # Malformed header (e.g. "not-a-number"). Treat as absent and fall
+            # through to the streaming-abort guard rather than raising a bare
+            # ValueError — no handler in app/main.py catches that, so it would
+            # surface as a 500 (violating the "no bare 500s" invariant).
+            declared = None
         if declared is not None and declared > limit:
             raise UpstreamRangeError(declared, limit)
 

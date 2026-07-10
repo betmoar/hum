@@ -185,6 +185,60 @@ async def test_fetch_range_rejects_oversized_200_without_content_length(
         await client.aclose()
 
 
+async def test_fetch_range_malformed_content_length_oversized_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 with a non-numeric Content-Length must not raise a bare
+    ValueError (which no handler catches → 500). It degrades to the
+    streaming-abort guard: an oversized body still raises UpstreamRangeError."""
+    requested = 1024
+    limit = requested * upstream_http._RANGE_OVER_FETCH_FACTOR
+    oversized_body = b"q" * (limit + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-length": "not-a-number"}, content=oversized_body
+        )
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        with pytest.raises(upstream_http.UpstreamRangeError) as ei:
+            await upstream_http.fetch_range(
+                "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+                start=0, end=requested - 1,
+            )
+        # Malformed header was treated as absent, not parsed.
+        assert ei.value.declared_length is None
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_malformed_content_length_small_body_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 with a non-numeric Content-Length but a small body degrades to
+    the streaming path and returns successfully, never crashing on int()."""
+    requested = 1024
+    body = b"r" * 200  # within the 2x slack
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-length": "garbage"}, content=body
+        )
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        result = await upstream_http.fetch_range(
+            "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+            start=0, end=requested - 1,
+        )
+        assert result == body
+    finally:
+        await client.aclose()
+
+
 def test_is_allowed_host_accepts_googlevideo() -> None:
     from app.adapters.upstream_http import is_allowed_host
     assert is_allowed_host("https://rr1---sn-abc.googlevideo.com/videoplayback?x=1") is True
