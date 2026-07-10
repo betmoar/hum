@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters import upstream_http
-from app.adapters.upstream_http import UpstreamHostError, UpstreamStatusError
+from app.adapters.upstream_http import UpstreamHostError, UpstreamRangeError, UpstreamStatusError
 from app.adapters.youtube import YouTubeError
 from app.api import channel, hls, live, playlist, radio, search, video
 from app.config import get_settings
@@ -95,6 +95,12 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(UpstreamStatusError)
     async def _handle_upstream_status(_: Request, exc: UpstreamStatusError) -> JSONResponse:
+        return JSONResponse(
+            {"error": "UPSTREAM_ERROR", "message": str(exc)}, status_code=502
+        )
+
+    @app.exception_handler(UpstreamRangeError)
+    async def _handle_upstream_range(_: Request, exc: UpstreamRangeError) -> JSONResponse:
         return JSONResponse(
             {"error": "UPSTREAM_ERROR", "message": str(exc)}, status_code=502
         )
