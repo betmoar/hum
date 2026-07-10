@@ -8,7 +8,7 @@ in the 2026-07 audit were fixed (see `tests/unit/test_audit_regressions.py`).
 
 | Risk | Why accepted |
 |---|---|
-| Bearer token lives in browser localStorage; any XSS = full compromise. | Single-user LAN app; no third-party scripts; CSP would be the next step (P1 below). |
+| Bearer token lives in browser localStorage; any XSS = full compromise. | Single-user LAN app; no third-party scripts. CSP is now shipped (`app/static.py`), reducing blast radius for script-injection XSS, but `style-src 'unsafe-inline'` remains (required by Svelte 5's compiled `element.style.cssText` writes) so style-based exfiltration vectors aren't fully closed. |
 | YouTube can invalidate cached CDN URLs early (IP change) → mid-play 403 until the frontend's refetch recovery kicks in. | Recovery works; backend-side retry-on-403 adds complexity for a rare event. |
 | `pytubefix` is reverse-engineered; total breakage is a *when*, not *if*. | Contained by invariant 1 + playbook 1. |
 | No rate limiting anywhere. | Single trusted user; bearer gate. Do not expose to the internet. |
@@ -16,12 +16,6 @@ in the 2026-07 audit were fixed (see `tests/unit/test_audit_regressions.py`).
 
 ## P1
 
-- **Content-Security-Policy.** Serve a strict CSP from `app/static.py` (or a meta tag
-  in `frontend/index.html`): `default-src 'self'; img-src 'self' https://i.ytimg.com;
-  media-src 'self' blob:; connect-src 'self'`. Blob is needed by hls.js MSE. This is
-  the single highest-value hardening left — it neuters the localStorage-token XSS risk.
-  Verify search thumbnails and Google-Fonts usage before shipping (fonts may need a
-  `font-src`/`style-src` entry or, better, self-host the font).
 - **`fetch_range` can buffer an entire file.** `app/adapters/upstream_http.py:
   fetch_range` accepts a 200 (full-body) response when the upstream ignores `Range`,
   which `resp.content`-buffers the whole media file in RAM. Reject 200 responses

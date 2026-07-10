@@ -55,3 +55,32 @@ def test_health_route_unaffected(app_with_dist: Any) -> None:
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "healthy"}
+
+
+def test_spa_response_has_csp_header(app_with_dist: Any) -> None:
+    client = TestClient(app_with_dist)
+    r = client.get("/")
+    assert r.status_code == 200
+    csp = r.headers.get("content-security-policy")
+    assert csp is not None
+    assert "default-src 'self'" in csp
+    assert "img-src" in csp and "i.ytimg.com" in csp
+    assert "media-src" in csp and "blob:" in csp
+
+
+def test_spa_fallback_route_also_has_csp_header(app_with_dist: Any) -> None:
+    client = TestClient(app_with_dist)
+    r = client.get("/queue")
+    assert r.status_code == 200
+    assert r.headers.get("content-security-policy") is not None
+
+
+def test_api_route_has_no_spa_csp_header(app_with_dist: Any) -> None:
+    """API/proxy JSON responses must not carry the SPA's CSP — a different
+    origin/response-type contract; asserting its absence here guards against
+    someone "helpfully" moving the header into global middleware later.
+    """
+    client = TestClient(app_with_dist)
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert "content-security-policy" not in {k.lower() for k in r.headers}
