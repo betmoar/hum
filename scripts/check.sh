@@ -20,12 +20,14 @@ if [ "$want" != "frontend" ]; then
   if ! command -v uv >/dev/null; then
     echo "uv not found. Install it: https://docs.astral.sh/uv/" >&2; exit 1
   fi
+  echo "── backend: sync deps (dev extras) ────────────────────"
+  uv sync --extra dev || fail "uv sync"
   echo "── backend: ruff ──────────────────────────────────────"
   uv run ruff check . || fail "ruff"
   echo "── backend: mypy --strict ─────────────────────────────"
   uv run mypy app/ --strict || fail "mypy"
-  echo "── backend: pytest (unit) ─────────────────────────────"
-  uv run pytest -q || fail "pytest"
+  echo "── backend: pytest (unit + coverage) ──────────────────"
+  uv run pytest -q --cov=app || fail "pytest"
 fi
 
 if [ "$want" != "backend" ]; then
