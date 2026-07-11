@@ -106,8 +106,12 @@ The cache in `app/adapters/youtube.py` is the highest-risk hot path. Rules:
 ## 5. Frontend: touching Player.svelte or the store
 
 - One `<audio>` element, owned by `Player.svelte`, mounted in `App.svelte` outside the
-  router. Never create a second one (the store's `switchQuality` queries
-  `document.querySelector('audio')` — a second element breaks it silently).
+  router. The store never touches the DOM directly: `Player.svelte` publishes an
+  imperative handle on `playerControls.current` (`getPosition`, `restoreAt`, etc.,
+  all closed over the component's own `el`), and the store calls through it (e.g.
+  `switchQuality` restores position via `playerControls.current?.restoreAt`). Keep
+  DOM access inside `Player.svelte` — a `document.querySelector('audio')` in the store
+  is the anti-pattern this handle replaced.
 - Any imperative `play()` call goes through `safePlay()` — bare `el.play()` produces
   unhandled rejections under autoplay policy.
 - Live tracks: hls.js owns error recovery. `handleError` deliberately returns early
