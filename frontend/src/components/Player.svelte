@@ -30,6 +30,9 @@
   let el = $state<HTMLAudioElement | null>(null);
   let pos = $state(0);
   let dur = $state(0);
+  // Pending one-shot loadedmetadata handler armed by playerControls.restoreAt,
+  // tracked so it can be replaced/removed (see restoreAt for why).
+  let pendingRestore: (() => void) | null = null;
   let paused = $state(true);
 
   // Inspector logging for the <audio> element. Filter on `[hum:audio]` in
@@ -111,15 +114,28 @@
       restoreAt: (pos: number) => {
         const a = el;
         if (!a) return;
-        if (a.readyState >= 1 /* HAVE_METADATA */) {
-          a.currentTime = pos;
-          return;
-        }
-        const onMeta = () => { a.currentTime = pos; };
+        // Always wait for the NEXT loadedmetadata, never a readyState fast-path:
+        // switchQuality calls this synchronously right after swapping
+        // player.current, so at call time `a` still holds the OLD (playing,
+        // readyState 4) source. Seeking now would set currentTime on the source
+        // about to be discarded; the src swap then resets it to 0 and the new
+        // source loads with nothing listening. We must seek on the new source's
+        // metadata event.
+        //
+        // Bound the listener: drop any still-pending restore before arming a new
+        // one, so repeated quality switches (or a switch whose metadata never
+        // fires, e.g. a failed load) can't accumulate stale listeners.
+        if (pendingRestore) a.removeEventListener('loadedmetadata', pendingRestore);
+        const onMeta = () => { a.currentTime = pos; pendingRestore = null; };
+        pendingRestore = onMeta;
         a.addEventListener('loadedmetadata', onMeta, { once: true });
       },
     };
-    return () => { playerControls.current = null; };
+    return () => {
+      if (el && pendingRestore) el.removeEventListener('loadedmetadata', pendingRestore);
+      pendingRestore = null;
+      playerControls.current = null;
+    };
   });
 
   // Reset Media Session metadata when the underlying videoId changes (not on
