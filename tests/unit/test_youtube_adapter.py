@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.adapters import youtube as adapter
-from app.models import ChannelInfo, PlaylistInfo, SearchHit, VideoDetails
+from app.models import ChannelInfo, PlaylistInfo, VideoDetails
 
 
 def _mock_stream(itag: int, mime_type: str, bitrate: int, **kw: Any) -> MagicMock:
@@ -157,6 +157,20 @@ def test_evict_expired_removes_stale_keeps_live() -> None:
     assert ("vidB", 2) in adapter._stream_url_cache
 
 
+def test_evict_stream_url_removes_only_target_entry() -> None:
+    adapter._stream_url_cache[("vidA", 140)] = ("https://x/1", time.time() + 100)
+    adapter._stream_url_cache[("vidA", 251)] = ("https://x/2", time.time() + 100)
+
+    adapter.evict_stream_url("vidA", 140)
+
+    assert ("vidA", 140) not in adapter._stream_url_cache
+    assert ("vidA", 251) in adapter._stream_url_cache
+
+
+def test_evict_stream_url_missing_key_is_noop() -> None:
+    adapter.evict_stream_url("nope", 999)  # must not raise
+
+
 async def test_concurrent_resolve_dedupes_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -286,6 +300,7 @@ async def test_playlist_handles_missing_title(monkeypatch: pytest.MonkeyPatch) -
 def test_search_passes_type_video_when_category_set(monkeypatch) -> None:
     """When category='music' is requested, the adapter must apply Filter type=Video."""
     import asyncio
+
     from app.adapters import youtube as adapter
 
     captured: dict = {}
@@ -310,6 +325,7 @@ def test_search_passes_type_video_when_category_set(monkeypatch) -> None:
 def test_search_passes_live_feature(monkeypatch) -> None:
     """When live=True is requested, the adapter must apply Filter features=Live."""
     import asyncio
+
     from app.adapters import youtube as adapter
 
     captured: dict = {}
@@ -332,6 +348,7 @@ def test_search_passes_live_feature(monkeypatch) -> None:
 def test_search_without_filters_passes_no_filter(monkeypatch) -> None:
     """Plain search() must NOT pass a filters arg (preserves legacy callers)."""
     import asyncio
+
     from app.adapters import youtube as adapter
 
     captured: dict = {"called_with_filters": False}
@@ -382,6 +399,7 @@ def test_search_overwrites_filter_when_category_music(monkeypatch) -> None:
     """When category='music' is requested, search() must overwrite `s.filter`
     via `_inject_music_topic` so the InnerTube call carries the music topic."""
     import asyncio
+
     from app.adapters import youtube as adapter
 
     class FakeSearch:
@@ -413,6 +431,7 @@ def test_search_overwrites_filter_when_category_music(monkeypatch) -> None:
 def test_search_does_not_inject_when_category_absent(monkeypatch) -> None:
     """category=None must not invoke `_inject_music_topic`."""
     import asyncio
+
     from app.adapters import youtube as adapter
 
     class FakeSearch:
@@ -466,7 +485,7 @@ def test_inject_music_topic_handles_empty_filters() -> None:
 
 
 def test_fetch_live_manifest_returns_info_when_url_present() -> None:
-    from app.adapters.youtube import _fetch_live_manifest, LiveStreamInfo
+    from app.adapters.youtube import LiveStreamInfo, _fetch_live_manifest
 
     class FakeYouTube:
         video_id = "abc12345678"
@@ -533,6 +552,7 @@ def test_fetch_live_manifest_returns_none_on_exception() -> None:
 
 def test_resolve_live_master_url_returns_url_on_first_call(monkeypatch) -> None:
     import asyncio
+
     import app.adapters.youtube as adapter
     from app.adapters.youtube import LiveStreamInfo
 
@@ -551,6 +571,7 @@ def test_resolve_live_master_url_returns_url_on_first_call(monkeypatch) -> None:
 
 def test_resolve_live_master_url_caches_result(monkeypatch) -> None:
     import asyncio
+
     import app.adapters.youtube as adapter
     from app.adapters.youtube import LiveStreamInfo
 
@@ -572,7 +593,9 @@ def test_resolve_live_master_url_caches_result(monkeypatch) -> None:
 
 def test_resolve_live_master_url_raises_when_fetch_returns_none(monkeypatch) -> None:
     import asyncio
+
     import pytest
+
     import app.adapters.youtube as adapter
 
     monkeypatch.setattr(adapter, "_fetch_live_manifest", lambda vid: None)
@@ -585,8 +608,9 @@ def test_resolve_live_master_url_raises_when_fetch_returns_none(monkeypatch) -> 
 
 def test_normalise_video_returns_live_video_details_when_live() -> None:
     from pytubefix.exceptions import LiveStreamError
-    from app.adapters.youtube import _normalise_video, LiveStreamInfo
+
     import app.adapters.youtube as adapter
+    from app.adapters.youtube import LiveStreamInfo, _normalise_video
 
     class FakeYouTube:
         video_id = "abc12345678"
@@ -617,8 +641,9 @@ def test_normalise_video_returns_live_video_details_when_live() -> None:
 def test_normalise_video_raises_when_live_and_manifest_unavailable() -> None:
     import pytest
     from pytubefix.exceptions import LiveStreamError
-    from app.adapters.youtube import _normalise_video
+
     import app.adapters.youtube as adapter
+    from app.adapters.youtube import _normalise_video
 
     class FakeYouTube:
         video_id = "abc12345678"
@@ -640,8 +665,8 @@ def test_normalise_video_raises_when_live_and_manifest_unavailable() -> None:
 def test_normalise_video_detects_live_via_vid_info_without_exception() -> None:
     """Some live videos don't raise LiveStreamError — vid_info.videoDetails.isLive
     is the only signal. Prefer the live path in that case."""
-    from app.adapters.youtube import _normalise_video, LiveStreamInfo
     import app.adapters.youtube as adapter
+    from app.adapters.youtube import LiveStreamInfo, _normalise_video
 
     class FakeYouTube:
         video_id = "abc12345678"
@@ -674,10 +699,10 @@ def test_normalise_video_detects_live_via_vid_info_without_exception() -> None:
     assert details.audio_formats == []
 
 
-def test_normalise_video_falls_through_to_vod_when_isLive_false() -> None:
+def test_normalise_video_falls_through_to_vod_when_is_live_false() -> None:
     """vid_info.videoDetails.isLive=false → no upfront live dispatch; VOD path runs."""
-    from app.adapters.youtube import _normalise_video
     import app.adapters.youtube as adapter
+    from app.adapters.youtube import _normalise_video
 
     class FakeStream:
         mime_type = "audio/mp4"

@@ -145,6 +145,7 @@ def _rewrite_tail(
     header: list[str] = []
     media_sequence = 0
     map_line: str | None = None
+    ended = False
     segments: list[tuple[list[str], str]] = []
     pending_tags: list[str] = []
 
@@ -170,8 +171,10 @@ def _rewrite_tail(
             header.append(line)
             continue
         if stripped.startswith("#EXT-X-ENDLIST"):
-            # Live playlist; ENDLIST shouldn't appear. If it does, preserve.
-            pending_tags.append(line)
+            # Broadcast finished. Must be re-emitted AFTER the kept segments
+            # (as a pending tag it would be dropped — no segment follows it)
+            # or the player polls a dead stream forever.
+            ended = True
             continue
         if stripped.startswith("#EXTINF") or stripped.startswith("#EXT-X-DISCONTINUITY"):
             pending_tags.append(line)
@@ -196,6 +199,8 @@ def _rewrite_tail(
     for seg_tags, seg_url in kept:
         out.extend(seg_tags)
         out.append(seg_url)
+    if ended:
+        out.append("#EXT-X-ENDLIST")
     return "\n".join(out) + ("\n" if has_trailing_newline else "")
 
 

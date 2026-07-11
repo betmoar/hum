@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Upstream failures no longer surface as bare 500s: pytubefix errors are mapped to
+  `YouTubeError` in the adapter and handled globally (`404 VIDEO_UNAVAILABLE`,
+  `503 YOUTUBE_BLOCKED`, `502 UPSTREAM_FAILURE` / `UPSTREAM_UNREACHABLE`).
+- HLS sidx parser returns a clean fallback (415 → direct stream) instead of crashing
+  when the segment index is truncated by the 64 KB head fetch.
+- Live tail-trimmed manifests preserve `#EXT-X-ENDLIST`, so players stop polling when
+  a broadcast ends.
+- Signed `hls_url` is now stripped from the persisted queue (both on write and on
+  rehydrate); Safari no longer replays an expired HLS URL after a reload.
+- Search results no longer race: a slow earlier query can't overwrite a newer one.
+- Non-ASCII bearer tokens return 401 instead of 500.
+- Unhandled `play()` promise rejections in the player are caught.
+
+### Security
+
+- Upstream host allowlist is enforced on every redirect hop (SSRF hardening).
+- `/api/debug/live/*` is gated on `DEBUG=true` (it exposes raw CDN URLs).
+- Docker image runs as a non-root user.
+
+### Added
+
+- Architecture invariants enforced as tests (`tests/unit/test_invariants.py`).
+- `scripts/check.sh` — the single pre-push gate mirroring CI.
+- Maintainer handoff docs: `CLAUDE.md`, `docs/PLAYBOOKS.md`, `docs/BACKLOG.md`.
+- Ruff now lints tests in CI (with test-appropriate ignores).
+
 ## [0.1.0] - 2026-05-30
 
 First tagged release of Hum — a self-hosted YouTube audio streamer.
@@ -36,5 +64,5 @@ First tagged release of Hum — a self-hosted YouTube audio streamer.
   3.11/3.12) and frontend (svelte-check, vitest, vite build); tag-triggered
   release workflow.
 
-[Unreleased]: https://github.com/betmoar/streamtube/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/betmoar/streamtube/releases/tag/v0.1.0
+[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/betmoar/hum/releases/tag/v0.1.0

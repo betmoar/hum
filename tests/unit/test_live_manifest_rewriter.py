@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from app.live.manifest import rewrite_media_playlist
 
-
 _BASE = "https://manifest.googlevideo.com/x/audio_only/playlist.m3u8"
 
 

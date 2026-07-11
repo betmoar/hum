@@ -42,7 +42,7 @@
   {/if}
 
   <div class="queue-list" role="list">
-    {#each store.queue as track, i (track.videoId + ':' + i)}
+    {#each store.queue as track, i (track.queueId ?? (track.videoId + ':' + i))}
       <QueueItem
         {track}
         index={i}

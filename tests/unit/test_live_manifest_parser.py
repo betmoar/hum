@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from app.live.manifest import parse_master
 
-
 _BASE = "https://manifest.googlevideo.com/api/manifest/hls_variant/x/master.m3u8"
 
 

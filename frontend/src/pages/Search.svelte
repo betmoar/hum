@@ -13,7 +13,16 @@
   let query = $state('');
   let recents = $state<string[]>(loadRecent());
 
-  async function onsubmit(q: string) {
+  // Monotonic request sequence: a slow early query must not overwrite the
+  // results of a faster later one (debounced typing fires overlapping calls).
+  let searchSeq = 0;
+
+  // Runs the network search and updates page state (query/loading/error/items).
+  // Shared by explicit submits (Enter key, recent-search chip) and the debounced
+  // preview-as-you-type path. Returns true on a successful, non-superseded fetch
+  // so callers can decide whether to bank the query into recents.
+  async function performSearch(q: string): Promise<boolean> {
+    const seq = ++searchSeq;
     query = q;
     loading = true;
     error = null;
@@ -21,18 +30,31 @@
     try {
       const opts = store.settings.musicOnly ? { category: 'music' as const } : undefined;
       const r = await api.search(q, 30, opts);
+      if (seq !== searchSeq) return false; // superseded by a newer search
       items = r.items;
-      // Only persist on successful submit (no point banking failed queries).
-      recents = withRecent(recents, q);
+      return true;
     } catch (e) {
+      if (seq !== searchSeq) return false;
       error = e instanceof Error ? e.message : 'Search failed';
+      return false;
     } finally {
-      loading = false;
+      if (seq === searchSeq) loading = false;
     }
   }
 
+  // Explicit submit (Enter key, or clicking a recent-search chip). This is the
+  // ONLY path that calls withRecent — banking a debounced preview query would
+  // pollute recents with every typing pause.
+  async function onsubmit(q: string) {
+    const ok = await performSearch(q);
+    // Only persist on successful submit (no point banking failed queries).
+    if (ok) recents = withRecent(recents, q);
+  }
+
+  // Debounced preview-as-you-type. Runs the same search but intentionally does
+  // not touch recents.
   async function ondebounced(q: string) {
-    await onsubmit(q);
+    await performSearch(q);
   }
 </script>
 

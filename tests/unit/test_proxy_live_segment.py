@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-import pytest
+
 from fastapi.testclient import TestClient
 
 
@@ -46,7 +46,6 @@ def test_live_segment_rejects_bad_upstream_host(monkeypatch, signing_key_hex):
 
 
 def test_live_segment_streams_upstream(monkeypatch, signing_key_hex):
-    import httpx
     from app.adapters import upstream_http
 
     class FakeResponse:

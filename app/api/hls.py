@@ -11,11 +11,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.adapters import upstream_http, youtube
-from app.adapters.upstream_http import UpstreamStatusError
+from app.adapters.upstream_http import (
+    UpstreamHostError,
+    UpstreamRangeError,
+    UpstreamStatusError,
+)
 from app.auth import SignatureError, sign_format_url, verify_signature
 from app.config import get_settings
 from app.hls import sidx
@@ -37,14 +41,18 @@ _HEAD_FETCH_BYTES = 64 * 1024
 _TARGET_SEGMENT_SECONDS = 60.0
 
 
-def _error(status: int, code: str, message: str) -> JSONResponse:
+def _error(request: Request, status: int, code: str, message: str) -> JSONResponse:
     """Match the {error, message} response shape the rest of the API uses
-    via the HumError handler in app.main."""
+    (see the global exception handlers in app.main). Records the code on
+    request.state so the access-log middleware appends code=<CODE>; response
+    body/status are unchanged."""
+    request.state.error_code = code
     return JSONResponse({"error": code, "message": message}, status_code=status)
 
 
 @router.get("/hls/{video_id}.m3u8", response_model=None)
 async def hls_manifest(
+    request: Request,
     video_id: VideoID,
     itag: int = Query(..., ge=1, le=9999),
     exp: int = Query(...),
@@ -55,13 +63,20 @@ async def hls_manifest(
     try:
         verify_signature(f"/api/hls/{video_id}.m3u8", itag=itag, exp=exp, sig=sig, key=key)
     except SignatureError as e:
-        return _error(e.status, "BAD_SIGNATURE", e.message)
+        return _error(request, e.status, "BAD_SIGNATURE", e.message)
 
     upstream_url = await youtube.resolve_upstream_url(video_id, itag)
     try:
         head = await upstream_http.fetch_range(upstream_url, start=0, end=_HEAD_FETCH_BYTES - 1)
     except UpstreamStatusError as e:
-        return _error(502, "UPSTREAM_ERROR", f"upstream returned {e.status}")
+        return _error(request, 502, "UPSTREAM_ERROR", f"upstream returned {e.status}")
+    except UpstreamHostError as e:
+        # A redirect during the head fetch pointed off the allowlist.
+        return _error(request, 502, "UPSTREAM_HOST_BLOCKED", str(e))
+    except UpstreamRangeError as e:
+        # Upstream ignored our Range on the head fetch and would have buffered
+        # a full file. Same 502/UPSTREAM_ERROR shape HLS uses for status errors.
+        return _error(request, 502, "UPSTREAM_ERROR", str(e))
 
     index = sidx.parse(head)
     if index is None or not index.segments:
@@ -69,7 +84,7 @@ async def hls_manifest(
         # fragments — tell the caller to use /proxy/audio. This isn't fatal,
         # just "HLS not applicable here". Guarding the empty case also keeps
         # _render_manifest's `max(...)` from raising on a degenerate index.
-        return _error(415, "NOT_FMP4", "stream not seekable via HLS byte-range")
+        return _error(request, 415, "NOT_FMP4", "stream not seekable via HLS byte-range")
 
     segment_uri = sign_format_url(
         f"/proxy/audio/{video_id}",

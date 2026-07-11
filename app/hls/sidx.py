@@ -70,6 +70,12 @@ def parse(data: bytes) -> ParsedIndex | None:
         return None
     if sidx_off < init_end:
         return None
+    # The sidx box claims to extend past the fetched head (very long streams
+    # can exceed the 64 KB head fetch). Every read below is bounded by
+    # `sidx_end`, so a truncated buffer would raise struct.error mid-parse.
+    # Bail out instead — the caller falls back to the direct stream.
+    if sidx_end > n:
+        return None
 
     return _parse_sidx(data, sidx_off, sidx_end, init_end)
 

@@ -27,6 +27,17 @@ def _is_youtube_host(host: str) -> bool:
     return any(host.endswith(s) for s in _ALLOWED_HOST_SUFFIXES)
 
 
+async def _enforce_allowlist_per_request(request: httpx.Request) -> None:
+    """Request event hook: runs for EVERY outgoing request, including each hop
+    of a redirect chain. Callers check the initial URL, but with
+    follow_redirects=True an upstream 3xx could otherwise send us to an
+    arbitrary host (SSRF via redirect). This hook makes that impossible.
+    """
+    host = request.url.host or ""
+    if not _is_youtube_host(host):
+        raise UpstreamHostError(f"host {host!r} not in allowlist (redirect target?)")
+
+
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
@@ -43,6 +54,7 @@ def _get_client() -> httpx.AsyncClient:
             ),
             limits=httpx.Limits(max_connections=s.upstream_pool_max),
             follow_redirects=True,
+            event_hooks={"request": [_enforce_allowlist_per_request]},
         )
     return _client
 
@@ -78,26 +90,86 @@ class UpstreamStatusError(Exception):
         super().__init__(f"upstream returned {status}")
 
 
+# fetch_range asks for a specific byte window. If the upstream ignores our
+# Range header it may reply 200 with the *entire* file — buffering that into
+# RAM defeats the point of asking for a small window. We allow some slack
+# (the upstream may pad slightly) but reject bodies wildly larger than what
+# we asked for. See docs/BACKLOG.md "fetch_range can buffer an entire file".
+_RANGE_OVER_FETCH_FACTOR = 2
+
+
+class UpstreamRangeError(Exception):
+    """Raised when the upstream ignores our Range request and returns (or
+    starts streaming) a 200 body far larger than the requested window."""
+
+    def __init__(self, declared_length: int | None, limit: int) -> None:
+        self.declared_length = declared_length
+        self.limit = limit
+        size_desc = "unknown size" if declared_length is None else f"{declared_length} bytes"
+        super().__init__(
+            f"upstream ignored Range and returned a 200 body of {size_desc}, "
+            f"exceeding the {limit}-byte limit"
+        )
+
+
 async def fetch_range(url: str, *, start: int, end: int) -> bytes:
     """One-shot Range GET of `bytes=start-end`. Returns the body buffered.
 
     Used by the HLS path to grab the first ~64 KB of a stream so we can
     parse the sidx without engaging the streaming body iterator. Raises
-    `UpstreamHostError` for off-allowlist hosts and `UpstreamStatusError`
-    for non-2xx upstream responses.
+    `UpstreamHostError` for off-allowlist hosts, `UpstreamStatusError` for
+    non-2xx upstream responses, and `UpstreamRangeError` if the upstream
+    ignores the Range header and returns a 200 body far larger than the
+    requested window (which would otherwise buffer the whole file in RAM).
     """
     host = urlparse(url).hostname or ""
     if not _is_youtube_host(host):
         raise UpstreamHostError(f"host {host!r} not in allowlist")
 
+    limit = (end - start + 1) * _RANGE_OVER_FETCH_FACTOR
+
     client = _get_client()
-    resp = await client.get(
+    req = client.build_request(
+        "GET",
         url,
         headers={"Range": f"bytes={start}-{end}", "Accept-Encoding": "identity"},
     )
-    if resp.status_code not in (200, 206):
-        raise UpstreamStatusError(resp.status_code)
-    return resp.content
+    resp = await client.send(req, stream=True)
+    try:
+        if resp.status_code not in (200, 206):
+            raise UpstreamStatusError(resp.status_code)
+
+        if resp.status_code == 206:
+            # Range honored — the body is bounded by the window we asked
+            # for, same as before this fix.
+            return await resp.aread()
+
+        # status_code == 200: upstream ignored our Range header. Reject
+        # cheaply via Content-Length when present; otherwise stream and
+        # abort as soon as we exceed the limit, so a lying/absent header
+        # can't force a full-file buffer either.
+        content_length = resp.headers.get("content-length")
+        try:
+            declared = int(content_length) if content_length is not None else None
+        except ValueError:
+            # Malformed header (e.g. "not-a-number"). Treat as absent and fall
+            # through to the streaming-abort guard rather than raising a bare
+            # ValueError — no handler in app/main.py catches that, so it would
+            # surface as a 500 (violating the "no bare 500s" invariant).
+            declared = None
+        if declared is not None and declared > limit:
+            raise UpstreamRangeError(declared, limit)
+
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.aiter_bytes():
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > limit:
+                raise UpstreamRangeError(declared, limit)
+        return b"".join(chunks)
+    finally:
+        await resp.aclose()
 
 
 def is_allowed_host(url: str) -> bool:

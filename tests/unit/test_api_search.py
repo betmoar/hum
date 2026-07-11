@@ -49,8 +49,9 @@ def test_search_validates_query_length(app_client: TestClient, bearer_token: str
 
 
 def test_search_forwards_category_to_adapter(monkeypatch, bearer_token):
-    from app.adapters import youtube as adapter
     from fastapi.testclient import TestClient
+
+    from app.adapters import youtube as adapter
 
     captured = {}
     async def fake_search(q, limit=20, *, category=None, live=False):
@@ -71,8 +72,9 @@ def test_search_forwards_category_to_adapter(monkeypatch, bearer_token):
 
 
 def test_search_forwards_live_to_adapter(monkeypatch, bearer_token):
-    from app.adapters import youtube as adapter
     from fastapi.testclient import TestClient
+
+    from app.adapters import youtube as adapter
 
     captured = {}
     async def fake_search(q, limit=20, *, category=None, live=False):
@@ -92,6 +94,7 @@ def test_search_forwards_live_to_adapter(monkeypatch, bearer_token):
 
 def test_search_rejects_unknown_category(bearer_token):
     from fastapi.testclient import TestClient
+
     from app.main import app
     client = TestClient(app)
     r = client.get(

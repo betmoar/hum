@@ -83,6 +83,7 @@ def test_video_signs_thumbnail_url(app_client: TestClient, bearer_token: str) ->
 def test_api_video_signs_live_stream_url(monkeypatch, bearer_token):
     """When the adapter returns is_live=True, the API signs live_stream_url."""
     from fastapi.testclient import TestClient
+
     from app.adapters import youtube as adapter
     from app.models import VideoDetails
 
@@ -114,6 +115,7 @@ def test_api_video_signs_live_stream_url(monkeypatch, bearer_token):
 def test_api_video_translates_live_not_supported(monkeypatch, bearer_token):
     """YouTubeError(422, LIVE_NOT_SUPPORTED) becomes a 422 response."""
     from fastapi.testclient import TestClient
+
     from app.adapters import youtube as adapter
 
     async def fake_video(video_id):

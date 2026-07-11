@@ -1,6 +1,9 @@
 """Tests for the upstream HTTP client wrapper."""
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import httpx
 import pytest
 
 from app.adapters import upstream_http
@@ -10,6 +13,16 @@ from app.adapters import upstream_http
 def reset_client() -> None:
     yield
     upstream_http._client = None
+
+
+def _mock_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.AsyncClient:
+    """A client wired to a MockTransport, with the same allowlist hook the
+    real client installs (so redirect/host behavior matches production)."""
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+        event_hooks={"request": [upstream_http._enforce_allowlist_per_request]},
+    )
 
 
 async def test_get_client_returns_singleton() -> None:
@@ -47,20 +60,183 @@ async def test_fetch_range_translates_upstream_non_2xx(
 ) -> None:
     """A 403/5xx from googlevideo becomes UpstreamStatusError, not a
     bare httpx exception or successful return of garbage bytes."""
-    import httpx
 
-    async def fake_get(self, url: str, *, headers: dict[str, str]) -> httpx.Response:
-        return httpx.Response(
-            403, content=b"forbidden", request=httpx.Request("GET", url)
-        )
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, content=b"forbidden")
 
-    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
-    with pytest.raises(upstream_http.UpstreamStatusError) as ei:
-        await upstream_http.fetch_range(
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        with pytest.raises(upstream_http.UpstreamStatusError) as ei:
+            await upstream_http.fetch_range(
+                "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+                start=0, end=1023,
+            )
+        assert ei.value.status == 403
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_returns_body_when_range_honored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The common case: upstream honors Range and replies 206 with exactly
+    the requested window. No change in behavior from before the fix."""
+    payload = b"x" * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["range"] == "bytes=0-1023"
+        return httpx.Response(206, content=payload)
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        body = await upstream_http.fetch_range(
             "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
             start=0, end=1023,
         )
-    assert ei.value.status == 403
+        assert body == payload
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_rejects_oversized_200_via_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Upstream ignores Range and replies 200 with a Content-Length far
+    larger than the requested window (e.g. the whole media file). This must
+    be rejected before the body is read into RAM — the point of the fix."""
+    requested = 1024  # bytes=0-1023
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "range" in request.headers
+        # Declare a huge body but don't actually send the bytes; if the
+        # implementation tried to read them all, this test would hang/OOM
+        # instead of failing fast on the Content-Length check.
+        return httpx.Response(
+            200,
+            headers={"content-length": str(100 * 1024 * 1024)},
+            content=b"",
+        )
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        with pytest.raises(upstream_http.UpstreamRangeError) as ei:
+            await upstream_http.fetch_range(
+                "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+                start=0, end=requested - 1,
+            )
+        assert ei.value.declared_length == 100 * 1024 * 1024
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_accepts_200_within_slack_factor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 body that's only slightly larger than requested (e.g. upstream
+    rounds up to a chunk boundary) is still accepted — the guard targets
+    whole-file buffering, not minor over-fetch."""
+    requested = 1024
+    body = b"y" * (requested + 100)  # comfortably within the 2x slack factor
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        result = await upstream_http.fetch_range(
+            "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+            start=0, end=requested - 1,
+        )
+        assert result == body
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_rejects_oversized_200_without_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Upstream ignores Range, replies 200, and omits/lies about
+    Content-Length. The guard must still catch this by aborting the stream
+    once the accumulated body exceeds the limit, never buffering the whole
+    thing."""
+    requested = 1024
+    limit = requested * upstream_http._RANGE_OVER_FETCH_FACTOR
+    oversized_body = b"z" * (limit + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        resp = httpx.Response(200, content=oversized_body)
+        del resp.headers["content-length"]
+        return resp
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        with pytest.raises(upstream_http.UpstreamRangeError) as ei:
+            await upstream_http.fetch_range(
+                "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+                start=0, end=requested - 1,
+            )
+        assert ei.value.declared_length is None
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_malformed_content_length_oversized_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 with a non-numeric Content-Length must not raise a bare
+    ValueError (which no handler catches → 500). It degrades to the
+    streaming-abort guard: an oversized body still raises UpstreamRangeError."""
+    requested = 1024
+    limit = requested * upstream_http._RANGE_OVER_FETCH_FACTOR
+    oversized_body = b"q" * (limit + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-length": "not-a-number"}, content=oversized_body
+        )
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        with pytest.raises(upstream_http.UpstreamRangeError) as ei:
+            await upstream_http.fetch_range(
+                "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+                start=0, end=requested - 1,
+            )
+        # Malformed header was treated as absent, not parsed.
+        assert ei.value.declared_length is None
+    finally:
+        await client.aclose()
+
+
+async def test_fetch_range_malformed_content_length_small_body_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 with a non-numeric Content-Length but a small body degrades to
+    the streaming path and returns successfully, never crashing on int()."""
+    requested = 1024
+    body = b"r" * 200  # within the 2x slack
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-length": "garbage"}, content=body
+        )
+
+    client = _mock_client(handler)
+    monkeypatch.setattr(upstream_http, "_client", client)
+    try:
+        result = await upstream_http.fetch_range(
+            "https://rr1---sn-test.googlevideo.com/videoplayback?id=x",
+            start=0, end=requested - 1,
+        )
+        assert result == body
+    finally:
+        await client.aclose()
 
 
 def test_is_allowed_host_accepts_googlevideo() -> None:
@@ -82,6 +258,7 @@ def test_is_allowed_host_rejects_other() -> None:
 def test_fetch_text_returns_body_and_base(monkeypatch) -> None:
     """fetch_text returns (text, base_url) where base_url is the URL after redirects."""
     import asyncio
+
     from app.adapters import upstream_http
 
     class FakeResponse:
@@ -103,7 +280,9 @@ def test_fetch_text_returns_body_and_base(monkeypatch) -> None:
 
 def test_fetch_text_rejects_disallowed_host() -> None:
     import asyncio
+
     import pytest
+
     from app.adapters import upstream_http
 
     with pytest.raises(upstream_http.UpstreamHostError):
@@ -112,7 +291,9 @@ def test_fetch_text_rejects_disallowed_host() -> None:
 
 def test_fetch_text_raises_on_non_2xx(monkeypatch) -> None:
     import asyncio
+
     import pytest
+
     from app.adapters import upstream_http
 
     class FakeResponse:

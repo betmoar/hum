@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from app.adapters import youtube
@@ -20,11 +20,15 @@ router = APIRouter(prefix="/api", tags=["video"])
     dependencies=[Depends(require_bearer)],
 )
 async def video(
+    request: Request,
     video_id: VideoID,
 ) -> VideoDetails | JSONResponse:
     try:
         details = await youtube.video(video_id)
     except youtube.YouTubeError as e:
+        # Surface the mapped code on the hum.access log line (this local catch
+        # never reaches app/main.py's global handler). Response is unchanged.
+        request.state.error_code = e.code
         return JSONResponse(
             {"error": e.code, "message": e.message},
             status_code=e.status,

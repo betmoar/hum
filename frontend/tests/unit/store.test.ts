@@ -12,7 +12,12 @@ const t = (id: string): Track => ({
   itag: 140,
 });
 
-// Helper to get a fresh store instance per test by re-importing.
+// Helper to get a fresh store instance per test by re-importing. Some tests
+// in this file call vi.resetModules() (see the rehydrate tests below), which
+// makes this dynamic import return a NEW module instance — with its own
+// `playerControls` singleton, distinct from the one bound by any static
+// top-of-file import. Callers that need `playerControls` for the currently
+// active store MUST get it from this same import, not a static import.
 async function freshStore() {
   const mod = await import('../../src/lib/store.svelte');
   mod.store.clear();
@@ -125,6 +130,43 @@ describe('AppStore', () => {
     expect(s.queue.map((x) => x.videoId)).toEqual(['z', 'a', 'b']);
   });
 
+  it('enqueue assigns a stable queueId to each track', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    s.enqueue(t('a')); // same videoId enqueued twice — exactly what queueId disambiguates
+    const ids = s.queue.map((x) => x.queueId);
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it('playNext assigns a queueId', async () => {
+    const s = await freshStore();
+    s.playNext(t('z'));
+    expect(s.queue[0].queueId).toBeTruthy();
+  });
+
+  it('reorder preserves each track\'s queueId (not just position)', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    s.enqueue(t('b'));
+    s.enqueue(t('c'));
+    const idsBefore = s.queue.map((x) => x.queueId);
+    s.reorder(0, 2);
+    const idsAfter = s.queue.map((x) => x.queueId);
+    expect(idsAfter).toEqual([idsBefore[1], idsBefore[2], idsBefore[0]]);
+  });
+
+  it('queueId survives persistence and rehydrate (not stripped)', async () => {
+    const s = await freshStore();
+    s.enqueue(t('a'));
+    const idBefore = s.queue[0].queueId;
+    await new Promise((r) => setTimeout(r, 250));
+    const raw = localStorage.getItem('hum.queue');
+    const parsed = JSON.parse(raw!);
+    expect(parsed[0].queueId).toBe(idBefore);
+  });
+
   it('toggleShuffle flips shuffle', async () => {
     const s = await freshStore();
     expect(s.player.shuffle).toBe(false);
@@ -192,6 +234,23 @@ describe('AppStore', () => {
     }
   });
 
+  it('flush strips hlsUrl from persisted queue', async () => {
+    // hlsUrl is signed like audioUrl. If it survives persistence, Safari's
+    // pickVodSrc() returns the stale URL on rehydrate and the refetch effect
+    // never runs — playback dies with an expired-signature error.
+    const s = await freshStore();
+    s.enqueue({
+      videoId: 'hls', title: 't', author: 'a', durationSeconds: 100,
+      thumbnailUrl: '', audioUrl: '/proxy/audio/hls?sig=fresh', itag: 140,
+      hlsUrl: '/api/hls/hls.m3u8?sig=fresh',
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const parsed = JSON.parse(localStorage.getItem('hum.queue')!);
+    for (const track of parsed) {
+      expect(track.hlsUrl).toBeUndefined();
+    }
+  });
+
   it('expandPlayer sets isExpanded only if a track is current', async () => {
     const s = await freshStore();
     s.expandPlayer();
@@ -235,6 +294,24 @@ describe('AppStore', () => {
     const mod = await import('../../src/lib/store.svelte');
     expect(mod.store.queue.map((t) => t.videoId)).toEqual(['rehydrate-test']);
     expect(mod.store.queue[0].audioUrl).toBe('');
+  });
+
+  it('rehydrate strips hlsUrl from previously-persisted queue', async () => {
+    // Defense in depth for queues written by older builds that persisted
+    // hlsUrl: the load path must clear it even if the flush path missed it.
+    vi.resetModules();
+    localStorage.setItem(
+      'hum.queue',
+      JSON.stringify([
+        {
+          videoId: 'rehydrate-hls', title: 't', author: 'a', durationSeconds: 100,
+          thumbnailUrl: '', audioUrl: '', itag: 140,
+          hlsUrl: '/api/hls/rehydrate-hls.m3u8?sig=stale-from-disk',
+        },
+      ]),
+    );
+    const mod = await import('../../src/lib/store.svelte');
+    expect(mod.store.queue[0].hlsUrl).toBeUndefined();
   });
 });
 
@@ -345,6 +422,50 @@ describe('AppStore.switchQuality', () => {
     const spy = vi.spyOn(apiMod.api, 'video');
     await s.switchQuality('hi');
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('calls playerControls.restoreAt with the captured position instead of touching the DOM', async () => {
+    // NOTE: playerControls must come from the SAME dynamic module instance as
+    // `s` (see freshStore() comment) — the rehydrate tests above call
+    // vi.resetModules(), so the static top-of-file `playerControls` import
+    // may be bound to a stale module instance whose `switchQuality` never
+    // observes writes to it.
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const pc = mod.playerControls;
+    s.setToken('t');
+    s.player.current = {
+      videoId: 'abc', title: 'T', author: 'A', durationSeconds: 100,
+      thumbnailUrl: '', audioUrl: '/proxy/audio/abc?itag=251', itag: 251,
+      qualityTier: 'hi', isLive: false,
+    } as any;
+
+    const restoreAt = vi.fn();
+    const getPosition = vi.fn(() => 37);
+    pc.current = {
+      play: () => {}, pause: () => {}, toggle: () => {},
+      seekBy: () => {}, setVolume: () => {}, toggleMute: () => {},
+      getPosition, restoreAt,
+    };
+
+    const fakeDetails = {
+      video_id: 'abc', title: 'T', author: 'A', channel_id: 'c',
+      duration_seconds: 100, thumbnail_url: '',
+      audio_formats: [
+        { itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus', url: '/proxy/audio/abc?itag=251' },
+        { itag: 249, mime_type: 'audio/webm; codecs="opus"', bitrate: 50000, codec: 'opus', url: '/proxy/audio/abc?itag=249' },
+      ],
+      video_formats: [],
+    };
+    const apiMod = await import('../../src/lib/api');
+    vi.spyOn(apiMod.api, 'video').mockResolvedValue(fakeDetails as any);
+
+    await s.switchQuality('low');
+
+    expect(getPosition).toHaveBeenCalled();
+    expect(restoreAt).toHaveBeenCalledWith(37);
+
+    pc.current = null;
   });
 });
 

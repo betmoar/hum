@@ -1,6 +1,6 @@
 # Hum
 
-[![CI](https://github.com/betmoar/streamtube/actions/workflows/ci.yml/badge.svg)](https://github.com/betmoar/streamtube/actions/workflows/ci.yml)
+[![CI](https://github.com/betmoar/hum/actions/workflows/ci.yml/badge.svg)](https://github.com/betmoar/hum/actions/workflows/ci.yml)
 
 **Sound, at home.**
 
@@ -55,7 +55,7 @@ The frontend prompts for the bearer token on first load and stores it in `localS
 
 ```bash
 cd frontend
-npm test           # vitest unit + component (42 tests)
+npm test           # vitest unit + component
 ```
 
 ## Endpoints
@@ -78,10 +78,15 @@ Proxy URLs are minted by `/api/video/{id}` — call it first, hand the returned 
 ## Testing
 
 ```bash
-pytest                  # fast unit tests (mocked; ~0.5s)
+./scripts/check.sh      # THE pre-push gate — mirrors CI exactly (backend + frontend)
+pytest                  # fast unit tests (mocked; ~1s)
 pytest -m integration   # hits real YouTube (5 tests, ~5s)
 pytest -m ''            # everything
 ```
+
+Maintainer docs: [CLAUDE.md](CLAUDE.md) (mental model + landmines),
+[docs/PLAYBOOKS.md](docs/PLAYBOOKS.md) (procedures), [docs/BACKLOG.md](docs/BACKLOG.md)
+(known debt).
 
 ## Configuration
 

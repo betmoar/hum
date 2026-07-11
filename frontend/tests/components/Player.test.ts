@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Player from '../../src/components/Player.svelte';
-import { store } from '../../src/lib/store.svelte';
+import { store, playerControls } from '../../src/lib/store.svelte';
 import type { Track, AudioFormat } from '../../src/lib/types';
 
 const sampleTrack = (id: string, audioUrl: string): Track => ({
@@ -42,6 +42,66 @@ describe('Player', () => {
     const audio = container.querySelector('audio') as HTMLAudioElement | null;
     expect(audio).not.toBeNull();
     expect(audio!.src).toContain('/proxy/audio/xyz');
+  });
+
+  it('playerControls.restoreAt seeks to position once metadata loads', async () => {
+    store.playNow(sampleTrack('seek', '/proxy/audio/seek?itag=140&exp=1&sig=' + 'c'.repeat(32)));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    playerControls.current!.restoreAt!(42);
+    Object.defineProperty(audio, 'currentTime', { value: 0, writable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(audio.currentTime).toBe(42);
+  });
+
+  it('restoreAt waits for the NEW source even when the old one is already loaded', async () => {
+    // Regression: switchQuality calls restoreAt synchronously right after
+    // swapping the src, so at call time the element still holds the OLD,
+    // fully-loaded (readyState 4) source. A readyState fast-path would seek the
+    // doomed old source; the src swap then resets currentTime to 0 and the new
+    // source loads with nothing listening — the seek is lost. restoreAt must
+    // defer to the NEW source's loadedmetadata.
+    store.playNow(sampleTrack('q', '/proxy/audio/q?itag=140&exp=1&sig=' + 'c'.repeat(32)));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+
+    // Old source is loaded and playing at call time.
+    Object.defineProperty(audio, 'readyState', { value: 4, configurable: true });
+    let seekTarget = 0;
+    Object.defineProperty(audio, 'currentTime', {
+      get: () => seekTarget,
+      set: (v: number) => { seekTarget = v; },
+      configurable: true,
+    });
+
+    playerControls.current!.restoreAt!(87);
+    // The old fast-path bug would have set currentTime here already.
+    expect(seekTarget).toBe(0);
+
+    // Browser resource selection on src swap resets position, then new metadata.
+    seekTarget = 0;
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(seekTarget).toBe(87);
+  });
+
+  it('restoreAt does not accumulate stale listeners across repeated calls', async () => {
+    store.playNow(sampleTrack('q', '/proxy/audio/q?itag=140&exp=1&sig=' + 'c'.repeat(32)));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'currentTime', { value: 0, writable: true, configurable: true });
+
+    // Three switches before any metadata fires (each supersedes the last).
+    playerControls.current!.restoreAt!(10);
+    playerControls.current!.restoreAt!(20);
+    playerControls.current!.restoreAt!(30);
+
+    // Only the last-armed handler should run; if listeners accumulated, an
+    // earlier handler would clobber currentTime afterward.
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(audio.currentTime).toBe(30);
   });
 
   it('"ended" event advances queue', async () => {

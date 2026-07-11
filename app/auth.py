@@ -43,7 +43,13 @@ def require_bearer(authorization: str | None = Header(default=None)) -> None:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     token = authorization[len("Bearer "):]
-    if not secrets.compare_digest(token, settings.api_bearer_token):
+    # Compare as bytes: compare_digest raises TypeError on non-ASCII *str*
+    # input, and header values may arrive latin-1 decoded — that must be a
+    # clean 401, not a 500.
+    if not secrets.compare_digest(
+        token.encode("utf-8", errors="replace"),
+        settings.api_bearer_token.encode("utf-8"),
+    ):
         raise HTTPException(status_code=401, detail="invalid bearer token")
     return None
 

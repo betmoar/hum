@@ -7,11 +7,14 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters import upstream_http
+from app.adapters.upstream_http import UpstreamHostError, UpstreamRangeError, UpstreamStatusError
+from app.adapters.youtube import YouTubeError
 from app.api import channel, hls, live, playlist, radio, search, video
 from app.config import get_settings
 from app.proxy import audio, live_segment, thumbnail
@@ -28,16 +31,6 @@ def _configure_logging() -> None:
     else:
         fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
     logging.basicConfig(level=level, format=fmt)
-
-
-# ----- Errors ---------------------------------------------------------------
-
-
-class HumError(Exception):
-    def __init__(self, status: int, code: str, message: str) -> None:
-        self.status = status
-        self.code = code
-        self.message = message
 
 
 # ----- App ------------------------------------------------------------------
@@ -79,16 +72,65 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         duration_ms = int((time.perf_counter() - start) * 1000)
         response.headers["X-Request-ID"] = rid
-        logging.getLogger("hum.access").info(
-            "%s %s -> %d (%dms) rid=%s",
-            request.method, request.url.path, response.status_code, duration_ms, rid,
-        )
+        # Exception handlers below stash the mapped error code on request.state
+        # so it lands in this single access-log line without touching the
+        # response body/status the client sees.
+        error_code = getattr(request.state, "error_code", None)
+        if error_code:
+            logging.getLogger("hum.access").info(
+                "%s %s -> %d (%dms) rid=%s code=%s",
+                request.method, request.url.path, response.status_code, duration_ms,
+                rid, error_code,
+            )
+        else:
+            logging.getLogger("hum.access").info(
+                "%s %s -> %d (%dms) rid=%s",
+                request.method, request.url.path, response.status_code, duration_ms, rid,
+            )
         return response
 
-    @app.exception_handler(HumError)
-    async def _handle_st(_: Request, exc: HumError) -> JSONResponse:
+    # Global error mapping. Routes may still catch these for bespoke messages;
+    # these handlers are the safety net that keeps upstream failures from
+    # surfacing as bare 500s (expired itag, dead video, YouTube down, ...).
+    # Each handler records the error code on request.state so the access-log
+    # middleware above can append it to the log line; response status/body are
+    # unchanged.
+    @app.exception_handler(YouTubeError)
+    async def _handle_youtube_error(request: Request, exc: YouTubeError) -> JSONResponse:
+        request.state.error_code = exc.code
         return JSONResponse(
             {"error": exc.code, "message": exc.message}, status_code=exc.status
+        )
+
+    @app.exception_handler(UpstreamHostError)
+    async def _handle_upstream_host(request: Request, exc: UpstreamHostError) -> JSONResponse:
+        request.state.error_code = "UPSTREAM_HOST_BLOCKED"
+        return JSONResponse(
+            {"error": "UPSTREAM_HOST_BLOCKED", "message": str(exc)}, status_code=502
+        )
+
+    @app.exception_handler(UpstreamStatusError)
+    async def _handle_upstream_status(request: Request, exc: UpstreamStatusError) -> JSONResponse:
+        request.state.error_code = "UPSTREAM_ERROR"
+        return JSONResponse(
+            {"error": "UPSTREAM_ERROR", "message": str(exc)}, status_code=502
+        )
+
+    @app.exception_handler(UpstreamRangeError)
+    async def _handle_upstream_range(request: Request, exc: UpstreamRangeError) -> JSONResponse:
+        request.state.error_code = "UPSTREAM_ERROR"
+        return JSONResponse(
+            {"error": "UPSTREAM_ERROR", "message": str(exc)}, status_code=502
+        )
+
+    @app.exception_handler(httpx.HTTPError)
+    async def _handle_httpx_error(request: Request, exc: httpx.HTTPError) -> JSONResponse:
+        # Connect/read failures against YouTube — the "YouTube is down/slow" case.
+        logging.getLogger("hum").warning("upstream transport error: %r", exc)
+        request.state.error_code = "UPSTREAM_UNREACHABLE"
+        return JSONResponse(
+            {"error": "UPSTREAM_UNREACHABLE", "message": "upstream request failed"},
+            status_code=502,
         )
 
     # Routes
