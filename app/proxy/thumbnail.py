@@ -1,7 +1,7 @@
 """GET /proxy/thumbnail/{id} — pass-through thumbnail proxy with signature."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.adapters import upstream_http
@@ -21,6 +21,7 @@ _THUMB_URL_TEMPLATES = [
 
 @router.get("/thumbnail/{video_id}")
 async def thumbnail(
+    request: Request,
     video_id: VideoID,
     # itag is fixed to 0 for thumbnails (no real format selector); kept in the
     # signature so the same sign/verify pair works across all proxy URLs.
@@ -35,6 +36,9 @@ async def thumbnail(
             f"/proxy/thumbnail/{video_id}", itag=itag, exp=exp, sig=sig, key=key
         )
     except SignatureError as e:
+        # HTTPException bypasses the global error_code-stashing handlers; set it
+        # here so the access log carries the code for this route too.
+        request.state.error_code = "BAD_SIGNATURE"
         raise HTTPException(status_code=e.status, detail=e.message) from e
 
     last_status = 502
@@ -50,4 +54,5 @@ async def thumbnail(
             )
         last_status = resp.status_code
         await resp.aclose()
+    request.state.error_code = "THUMBNAIL_NOT_FOUND"
     raise HTTPException(status_code=last_status, detail="thumbnail not found")

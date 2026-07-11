@@ -15,7 +15,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.adapters import upstream_http, youtube
-from app.adapters.upstream_http import UpstreamStatusError
+from app.adapters.upstream_http import (
+    UpstreamHostError,
+    UpstreamRangeError,
+    UpstreamStatusError,
+)
 from app.auth import SignatureError, sign_format_url, verify_signature
 from app.config import get_settings
 from app.hls import sidx
@@ -66,6 +70,13 @@ async def hls_manifest(
         head = await upstream_http.fetch_range(upstream_url, start=0, end=_HEAD_FETCH_BYTES - 1)
     except UpstreamStatusError as e:
         return _error(request, 502, "UPSTREAM_ERROR", f"upstream returned {e.status}")
+    except UpstreamHostError as e:
+        # A redirect during the head fetch pointed off the allowlist.
+        return _error(request, 502, "UPSTREAM_HOST_BLOCKED", str(e))
+    except UpstreamRangeError as e:
+        # Upstream ignored our Range on the head fetch and would have buffered
+        # a full file. Same 502/UPSTREAM_ERROR shape HLS uses for status errors.
+        return _error(request, 502, "UPSTREAM_ERROR", str(e))
 
     index = sidx.parse(head)
     if index is None or not index.segments:

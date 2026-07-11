@@ -89,6 +89,10 @@ def create_signed_stream_router(
                 f"{proxy_base}/{video_id}", itag=itag, exp=exp, sig=sig, key=key
             )
         except SignatureError as e:
+            # HTTPException is handled by Starlette directly, bypassing the
+            # global handlers that stash error_code — set it here so the access
+            # log carries code=BAD_SIGNATURE for this route too.
+            request.state.error_code = "BAD_SIGNATURE"
             raise HTTPException(status_code=e.status, detail=e.message) from e
 
         upstream_url = await youtube.resolve_upstream_url(video_id, itag)
