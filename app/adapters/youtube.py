@@ -58,10 +58,11 @@ _CACHE_MAX_TTL = 3600.0  # 1 hour
 # Cache: video_id -> (VideoDetails, expiry_epoch). Holds the canonical UNSIGNED
 # copy — /api/video signs by MUTATING the object it gets, so readers always
 # receive model_copy(deep=True), never the cached instance. Live videos are
-# never stored (post-fetch discard: live state goes stale fast). The clamp to
-# _CACHE_MAX_TTL is for metadata freshness (title/views/format availability
-# drift) — the cached proxy paths are unsigned and stable, with no expiry
-# coupling to _stream_url_cache.
+# never stored (post-fetch discard: live state goes stale fast) — but they
+# still go through the single-flight join in video(); only the cache *write*
+# is skipped. The clamp to _CACHE_MAX_TTL is for metadata freshness
+# (title/views/format availability drift) — the cached proxy paths are
+# unsigned and stable, with no expiry coupling to _stream_url_cache.
 _video_details_cache: dict[str, tuple[VideoDetails, float]] = {}
 
 # Cache: (query, category, live, limit) -> (hits, expiry_epoch). Read/write
@@ -198,7 +199,10 @@ async def video(video_id: str) -> VideoDetails:
     task = asyncio.create_task(_to_thread_mapped(_fetch_video_cached, video_id))
     _inflight_video[video_id] = task
     try:
-        return await task
+        # Copy here too — the caller signs by mutating the returned object, and
+        # joiners share this same task result, so returning the raw instance
+        # races joiners' copies against the creator's caller's mutation.
+        return (await task).model_copy(deep=True)
     finally:
         _inflight_video.pop(video_id, None)
 

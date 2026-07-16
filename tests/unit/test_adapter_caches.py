@@ -88,11 +88,28 @@ async def test_cache_hit_returns_independent_unsigned_copies(
 async def test_concurrent_misses_single_flight(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"n": 0}
     monkeypatch.setattr(adapter, "_make_youtube", _counting_factory(calls, delay=0.05))
-    results = await asyncio.gather(*(adapter.video("dQw4w9WgXcQ") for _ in range(5)))
+
+    # Simulate /api/video's signing-by-mutation happening synchronously right
+    # after each caller's `await adapter.video(...)` returns — as it does in
+    # the real route handler — rather than after all callers have finished.
+    # This is what actually exercises the creator/joiner race: if `video()`'s
+    # single-flight *creator* path returned the raw task result (no copy),
+    # caller 0's mutation would land on the same object every joiner's
+    # `.model_copy(deep=True)` reads from, tainting all of them.
+    async def caller(idx: int) -> Any:
+        v = await adapter.video("dQw4w9WgXcQ")
+        if idx == 0:
+            v.audio_formats[0].url += "&exp=1&sig=" + "ab" * 16
+        return v
+
+    results = await asyncio.gather(*(caller(i) for i in range(5)))
     assert calls["n"] == 1
     # No two callers share an instance (each signs independently downstream).
     assert len({id(r) for r in results}) == 5
     assert adapter._inflight_video == {}
+    assert "sig=" in results[0].audio_formats[0].url
+    for r in results[1:]:
+        assert "sig=" not in r.audio_formats[0].url
 
 
 async def test_live_video_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
