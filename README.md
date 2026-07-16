@@ -12,19 +12,48 @@ Single-user FastAPI backend with bearer-token API auth and Blake3-signed stream 
 
 ## Quick start
 
+Both paths start with:
+
 ```bash
 git clone <repo>
 cd hum
-
-cp .env.example .env
-python -c "import secrets; print('API_BEARER_TOKEN=' + secrets.token_urlsafe(32))" >> .env
-python -c "import secrets; print('STREAM_SIGNING_KEY=' + secrets.token_hex(32))" >> .env
-
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
-
-uvicorn app.main:app --reload
 ```
+
+### Docker
+
+```bash
+./scripts/setup.sh --secrets-only   # writes .env with generated secrets
+docker compose up
+```
+
+Open http://127.0.0.1:8000.
+
+### Local (uv)
+
+Requires [uv](https://docs.astral.sh/uv/) and Node 20+.
+
+```bash
+./scripts/setup.sh --dev    # secrets + backend/frontend deps + dev servers
+```
+
+Open http://127.0.0.1:5173 (vite dev server; API on :8000).
+
+Production-style single process: `./scripts/setup.sh --prod` builds
+`frontend/dist/` and serves everything on :8000.
+
+<details>
+<summary>Manual setup (what setup.sh does)</summary>
+
+```bash
+cp .env.example .env
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"  # -> API_BEARER_TOKEN in .env
+python3 -c "import secrets; print(secrets.token_hex(32))"      # -> STREAM_SIGNING_KEY in .env
+uv sync --extra dev
+npm --prefix frontend ci
+uv run uvicorn app.main:app --reload
+# without uv: python3.11 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'
+```
+</details>
 
 ## Frontend
 

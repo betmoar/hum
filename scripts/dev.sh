@@ -10,7 +10,7 @@ if [ ! -d frontend/node_modules ]; then
 fi
 
 if [ ! -d .venv ]; then
-  echo "no .venv found — create one with: python3.11 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'"
+  echo "no .venv found — run ./scripts/setup.sh first"
   exit 1
 fi
 
