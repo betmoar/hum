@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     stream_signing_key: str = Field(..., description="32-byte hex-encoded signing key")
     stream_url_ttl_seconds: int = 21600  # 6h
 
+    # Caching (adapter-level, in-memory)
+    video_cache_ttl_seconds: int = Field(3600, ge=1)   # clamped by adapter _CACHE_MAX_TTL
+    search_cache_ttl_seconds: int = Field(300, ge=1)
+
     # CORS — comma-separated origins; default localhost only
     cors_origins: str = "http://127.0.0.1,http://localhost"
 

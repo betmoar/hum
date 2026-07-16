@@ -97,6 +97,8 @@ See [.env.example](.env.example). All settings via environment variables.
 | `API_BEARER_TOKEN` | yes | — | Bearer token for `/api/*` (>=16 chars) |
 | `STREAM_SIGNING_KEY` | yes | — | 32-byte hex Blake3 signing key |
 | `STREAM_URL_TTL_SECONDS` | no | 21600 | Signed URL TTL (6h) |
+| `VIDEO_CACHE_TTL_SECONDS` | no | 3600 | Video metadata cache TTL, seconds (capped at 1h by the adapter) |
+| `SEARCH_CACHE_TTL_SECONDS` | no | 300 | Search result cache TTL, seconds |
 | `HOST` | no | 127.0.0.1 | Bind host |
 | `PORT` | no | 8000 | Bind port |
 | `CORS_ORIGINS` | no | `http://127.0.0.1,http://localhost` | Comma-separated allowed origins |
