@@ -18,5 +18,5 @@ fi
 source .venv/bin/activate
 
 (cd frontend && npm run dev) &
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 &
+uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 8000 &
 wait
