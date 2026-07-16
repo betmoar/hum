@@ -167,6 +167,10 @@ async def search(
     category: str | None = None,
     live: bool = False,
 ) -> list[SearchHit]:
+    cache_key = (query, category, live, limit)
+    cached = _search_cache.get(cache_key)
+    if cached and cached[1] > time.time():
+        return list(cached[0])  # shallow list copy; hits are not mutated downstream
     raw_filters = _build_search_filters(category=category, live=live)
     pytubefix_filters: dict[str, Any] | None = None
     wants_music = False
@@ -180,7 +184,7 @@ async def search(
         # it with the music-topic field merged in. On encoder failure, leave
         # `s.filter` untouched so the search degrades to type=Video + features.
         _inject_music_topic(s, pytubefix_filters)
-    return await _to_thread_mapped(_collect_search_hits, s, limit)
+    return await _to_thread_mapped(_collect_and_cache_search, s, limit, cache_key)
 
 
 async def video(video_id: str) -> VideoDetails:
@@ -359,19 +363,25 @@ def _refresh_cache(video_id: str) -> None:
 
 
 def _evict_expired(now: float | None = None) -> None:
-    """Drop expired entries from the stream URL cache.
+    """Drop expired entries from all adapter caches.
 
-    Without this the cache grows unbounded over a long-running process — every
-    (video_id, itag) ever requested would linger forever. Called after each
-    refresh (i.e. on a cache miss, already off the hot path). We snapshot the
-    keys first: refreshes run in asyncio.to_thread workers, so a concurrent
-    writer could otherwise mutate the dict mid-iteration.
+    Without this the caches grow unbounded over a long-running process.
+    Called off the request hot path: after each refresh (stream-URL miss) and
+    after each search-cache write. Keys are snapshotted first: writers run in
+    asyncio.to_thread workers, so a concurrent writer could otherwise mutate
+    a dict mid-iteration.
     """
     cutoff = now if now is not None else time.time()
-    for key in list(_stream_url_cache.keys()):
-        entry = _stream_url_cache.get(key)
-        if entry is not None and entry[1] <= cutoff:
-            _stream_url_cache.pop(key, None)
+    caches: tuple[dict[Any, Any], ...] = (
+        _stream_url_cache,
+        _video_details_cache,
+        _search_cache,
+    )
+    for cache in caches:
+        for key in list(cache.keys()):
+            entry = cache.get(key)
+            if entry is not None and entry[1] <= cutoff:
+                cache.pop(key, None)
 
 
 # ---- Normalisation -------------------------------------------------------
@@ -569,6 +579,22 @@ def _collect_search_hits(s: Any, limit: int) -> list[SearchHit]:
             hits.append(hit)
             if len(hits) >= limit:
                 return hits
+    return hits
+
+
+def _collect_and_cache_search(
+    s: Any, limit: int, cache_key: tuple[str, str | None, bool, int]
+) -> list[SearchHit]:
+    """_collect_search_hits plus the search-cache write and an eviction sweep.
+
+    Runs in a to_thread worker (hit collection is the network-lazy part).
+    The sweep runs HERE because a search-only session never reaches
+    _refresh_cache — without it the search cache would grow unbounded.
+    """
+    hits = _collect_search_hits(s, limit)
+    ttl = float(get_settings().search_cache_ttl_seconds)
+    _search_cache[cache_key] = (list(hits), time.time() + ttl)
+    _evict_expired()
     return hits
 
 

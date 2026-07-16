@@ -137,3 +137,73 @@ async def test_video_ttl_clamped_to_cache_max(monkeypatch: pytest.MonkeyPatch) -
     await adapter.video("dQw4w9WgXcQ")
     _, expiry = adapter._video_details_cache["dQw4w9WgXcQ"]
     assert expiry <= before + adapter._CACHE_MAX_TTL + 5.0
+
+
+# ---- search cache ---------------------------------------------------------
+
+
+def _mock_search_result() -> MagicMock:
+    s = MagicMock()
+    v = MagicMock()
+    v.video_id = "vid00000001"
+    v.title = "Hit"
+    v.author = "A"
+    v.thumbnail_url = "https://i.ytimg.com/vi/vid00000001/hq.jpg"
+    v.length = 100
+    v.is_live = False
+    s.videos = [v]
+    s.channels = []
+    s.playlists = []
+    return s
+
+
+def _counting_search_factory(calls: dict[str, int]) -> Any:
+    def factory(q: str, *, filters: Any = None) -> MagicMock:
+        calls["n"] += 1
+        return _mock_search_result()
+
+    return factory
+
+
+async def test_search_cache_hit_skips_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory(calls))
+    r1 = await adapter.search("cache me", limit=5)
+    r2 = await adapter.search("cache me", limit=5)
+    assert calls["n"] == 1
+    assert [h.id for h in r1] == [h.id for h in r2] == ["vid00000001"]
+
+
+async def test_search_cache_key_includes_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory(calls))
+    await adapter.search("q", limit=5)
+    await adapter.search("q", limit=10)          # different limit -> miss
+    await adapter.search("q", limit=5, live=True)  # different live -> miss
+    assert calls["n"] == 3
+
+
+async def test_search_cache_expiry_refetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory(calls))
+    await adapter.search("q", limit=5)
+    key = ("q", None, False, 5)
+    hits, _ = adapter._search_cache[key]
+    adapter._search_cache[key] = (hits, time.time() - 1)
+    await adapter.search("q", limit=5)
+    assert calls["n"] == 2
+
+
+async def test_search_write_sweeps_all_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A search-only session must still evict expired entries everywhere —
+    _refresh_cache (the old sole sweep site) never runs on this path."""
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory({"n": 0}))
+    stale = time.time() - 10
+    adapter._stream_url_cache[("dead", 140)] = ("https://x", stale)
+    adapter._video_details_cache["dead"] = (MagicMock(), stale)
+    adapter._search_cache[("old", None, False, 20)] = ([], stale)
+    await adapter.search("fresh", limit=5)
+    assert ("dead", 140) not in adapter._stream_url_cache
+    assert "dead" not in adapter._video_details_cache
+    assert ("old", None, False, 20) not in adapter._search_cache
+    assert ("fresh", None, False, 5) in adapter._search_cache
