@@ -38,6 +38,7 @@ fill_blank_key() {
     mv "$tmp" .env
     echo "generated ${key}"
   elif ! grep -q "^${key}=" .env; then
+    [ -s .env ] && [ "$(tail -c 1 .env)" != "" ] && printf '\n' >> .env
     printf '%s=%s\n' "$key" "$value" >> .env
     echo "generated ${key} (key was absent — appended)"
   fi
