@@ -27,6 +27,7 @@ try:
 except Exception:
     _encode_protobuf = None
 
+from app.config import get_settings
 from app.models import (
     AudioFormat,
     ChannelInfo,
@@ -53,6 +54,23 @@ _inflight_refresh: dict[str, asyncio.Task[None]] = {}
 # Long enough to cover a typical listening session without forcing a pytubefix
 # re-fetch (which is expensive: HTTPS + Node cipher deobfuscation).
 _CACHE_MAX_TTL = 3600.0  # 1 hour
+
+# Cache: video_id -> (VideoDetails, expiry_epoch). Holds the canonical UNSIGNED
+# copy — /api/video signs by MUTATING the object it gets, so readers always
+# receive model_copy(deep=True), never the cached instance. Live videos are
+# never stored (post-fetch discard: live state goes stale fast). The clamp to
+# _CACHE_MAX_TTL is for metadata freshness (title/views/format availability
+# drift) — the cached proxy paths are unsigned and stable, with no expiry
+# coupling to _stream_url_cache.
+_video_details_cache: dict[str, tuple[VideoDetails, float]] = {}
+
+# Cache: (query, category, live, limit) -> (hits, expiry_epoch). Read/write
+# logic lives in search(); swept by _evict_expired.
+_search_cache: dict[tuple[str, str | None, bool, int], tuple[list[SearchHit], float]] = {}
+
+# In-flight video() fetches, keyed by video_id — same single-flight shape as
+# _inflight_refresh. Self-cleaning: popped in a finally.
+_inflight_video: dict[str, asyncio.Task[VideoDetails]] = {}
 
 
 class YouTubeError(Exception):
@@ -165,10 +183,24 @@ async def search(
 
 
 async def video(video_id: str) -> VideoDetails:
-    # The construction + stream iteration both touch network + Node-cipher work,
-    # so they MUST run off the event loop. Combining into one to_thread keeps the
-    # event loop unblocked for concurrent requests.
-    return await _to_thread_mapped(_fetch_video, video_id)
+    # Metadata cache hit: deep-copy so per-request signing can't touch the
+    # cached canonical (see _video_details_cache comment).
+    cached = _video_details_cache.get(video_id)
+    if cached and cached[1] > time.time():
+        return cached[0].model_copy(deep=True)
+    # Single-flight: concurrent misses for the same id share one fetch. The
+    # check-and-create is atomic within the event loop (no await between the
+    # .get() and the assignment), mirroring _refresh_cache_once.
+    task = _inflight_video.get(video_id)
+    if task is not None:
+        # Joiners copy too — sharing the creator's instance would double-sign.
+        return (await task).model_copy(deep=True)
+    task = asyncio.create_task(_to_thread_mapped(_fetch_video_cached, video_id))
+    _inflight_video[video_id] = task
+    try:
+        return await task
+    finally:
+        _inflight_video.pop(video_id, None)
 
 
 async def channel(channel_id: str) -> ChannelInfo:
@@ -268,6 +300,16 @@ async def _refresh_cache_once(video_id: str) -> None:
 def _fetch_video(video_id: str) -> VideoDetails:
     yt = _make_youtube(video_id)
     return _normalise_video(video_id, yt)
+
+
+def _fetch_video_cached(video_id: str) -> VideoDetails:
+    """_fetch_video plus the metadata-cache write. Runs in a to_thread worker
+    (construction + stream iteration touch network + Node-cipher work)."""
+    details = _fetch_video(video_id)
+    if not details.is_live:
+        ttl = min(float(get_settings().video_cache_ttl_seconds), _CACHE_MAX_TTL)
+        _video_details_cache[video_id] = (details.model_copy(deep=True), time.time() + ttl)
+    return details
 
 
 def _fetch_live_manifest(video_id: str) -> LiveStreamInfo | None:
