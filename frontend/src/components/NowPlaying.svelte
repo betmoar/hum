@@ -251,9 +251,9 @@
       <!-- AirPlay: opens Safari's system picker via the shared playerControls
            method (the <audio> element lives in Player.svelte). Active/route
            state is owned there; this surface is intentionally stateless.
-           airplayCapable gates it so the button never shows when AirPlay is
-           unsupported, no target is available, or the track is live. -->
-      {#if playerControls.current?.airplayCapable}
+           store.player.airplayCapable gates it so the button never shows when
+           AirPlay is unsupported, no target is available, or the track is live. -->
+      {#if store.player.airplayCapable}
         <button
           class="mode"
           aria-label="AirPlay"

@@ -153,14 +153,16 @@
     return () => airplay.detach();
   });
 
-  // Mirror AirPlay capability onto playerControls so NowPlaying (which has no
-  // airplay-control instance of its own) can gate its button on the same
-  // conditions Player uses, and never render a button that no-ops on click.
+  // AirPlay capability (supported + target available + not live). Written to
+  // the reactive store so BOTH Player and NowPlaying gate on one source —
+  // playerControls is a plain non-reactive imperative handle (see store), so a
+  // flag on it would never re-render NowPlaying when the availability event
+  // arrives post-mount.
   let airplayCapable = $derived(
     airplaySupported && airplay.state.available !== false && !store.player.current?.isLive
   );
   $effect(() => {
-    if (playerControls.current) playerControls.current.airplayCapable = airplayCapable;
+    store.player.airplayCapable = airplayCapable;
   });
 
   // Reset Media Session metadata when the underlying videoId changes (not on
