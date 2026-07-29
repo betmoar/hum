@@ -7,8 +7,11 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
+from pytubefix import exceptions as pytubefix_exceptions
 
 from app.adapters import youtube as adapter
+from app.models import SearchHit
 
 
 def _mock_stream(itag: int, mime_type: str) -> MagicMock:
@@ -136,7 +139,9 @@ async def test_video_ttl_clamped_to_cache_max(monkeypatch: pytest.MonkeyPatch) -
     before = time.time()
     await adapter.video("dQw4w9WgXcQ")
     _, expiry = adapter._video_details_cache["dQw4w9WgXcQ"]
-    assert expiry <= before + adapter._CACHE_MAX_TTL + 5.0
+    # Bounded on BOTH sides: an upper-only bound would also pass if the clamp
+    # collapsed the TTL to ~0 (e.g. min() operands swapped).
+    assert before + adapter._CACHE_MAX_TTL - 5.0 <= expiry <= before + adapter._CACHE_MAX_TTL + 5.0
 
 
 # ---- search cache ---------------------------------------------------------
@@ -207,3 +212,123 @@ async def test_search_write_sweeps_all_caches(monkeypatch: pytest.MonkeyPatch) -
     assert "dead" not in adapter._video_details_cache
     assert ("old", None, False, 20) not in adapter._search_cache
     assert ("fresh", None, False, 5) in adapter._search_cache
+
+
+async def test_search_cache_key_includes_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory(calls))
+    await adapter.search("q", limit=5)
+    await adapter.search("q", limit=5, category="music")  # different category -> miss
+    assert calls["n"] == 2
+
+
+async def test_search_ttl_clamped_to_cache_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = MagicMock()
+    settings.search_cache_ttl_seconds = 10_000_000
+    monkeypatch.setattr(adapter, "get_settings", lambda: settings)
+    monkeypatch.setattr(adapter, "_make_search", _counting_search_factory({"n": 0}))
+    before = time.time()
+    await adapter.search("q", limit=5)
+    _, expiry = adapter._search_cache[("q", None, False, 5)]
+    assert before + adapter._CACHE_MAX_TTL - 5.0 <= expiry <= before + adapter._CACHE_MAX_TTL + 5.0
+
+
+async def test_concurrent_searches_single_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    def slow_factory(q: str, *, filters: Any = None) -> MagicMock:
+        calls["n"] += 1
+        time.sleep(0.05)
+        return _mock_search_result()
+
+    monkeypatch.setattr(adapter, "_make_search", slow_factory)
+    results = await asyncio.gather(*(adapter.search("same", limit=5) for _ in range(5)))
+    assert calls["n"] == 1
+    assert all([h.id for h in r] == ["vid00000001"] for r in results)
+    # Each caller owns its own list (may filter/reorder); hits themselves are shared.
+    assert len({id(r) for r in results}) == 5
+    assert adapter._inflight_search == {}
+
+
+async def test_search_hits_are_frozen() -> None:
+    """The search cache hands out shallow list copies, so a mutable SearchHit
+    would let one caller poison every later cache hit. Frozen makes it raise."""
+    hit = SearchHit(kind="video", id="vid00000001", title="T", thumbnail_url="https://x/t.jpg")
+    with pytest.raises(ValidationError):
+        hit.title = "mutated"  # type: ignore[misc]
+
+
+# ---- failure / cancellation paths -----------------------------------------
+
+
+async def test_failed_video_fetch_is_not_cached_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient fetch failure must not be cached, must not wedge the
+    in-flight registry, and must let the next call retry."""
+    calls = {"n": 0}
+
+    def flaky(vid: str) -> MagicMock:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise pytubefix_exceptions.PytubeFixError("transient upstream failure")
+        return _mock_youtube(vid)
+
+    monkeypatch.setattr(adapter, "_make_youtube", flaky)
+    # _to_thread_mapped sends a bare PytubeFixError to the catch-all 502 bucket.
+    with pytest.raises(adapter.YouTubeError) as exc:
+        await adapter.video("dQw4w9WgXcQ")
+    assert exc.value.status == 502
+    assert "dQw4w9WgXcQ" not in adapter._video_details_cache
+    assert adapter._inflight_video == {}
+    details = await adapter.video("dQw4w9WgXcQ")  # retry succeeds
+    assert details.title == "Test Title"
+    assert calls["n"] == 2
+
+
+async def test_video_joiner_survives_creator_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client disconnecting mid-fetch cancels ITS request task. That must not
+    cancel the shared single-flight task other callers are waiting on — a
+    CancelledError reaching a route handler is BaseException, so it escapes
+    every handler in app.main and the client gets a torn connection instead of
+    the mapped 4xx/5xx the frontend's recovery keys off.
+    """
+    monkeypatch.setattr(adapter, "_make_youtube", _counting_factory({"n": 0}, delay=0.3))
+
+    creator = asyncio.create_task(adapter.video("dQw4w9WgXcQ"))
+    await asyncio.sleep(0.05)  # let the creator register the in-flight task
+    joiner = asyncio.create_task(adapter.video("dQw4w9WgXcQ"))
+    await asyncio.sleep(0.05)  # let the joiner attach to it
+    assert "dQw4w9WgXcQ" in adapter._inflight_video
+
+    creator.cancel()  # client A disconnects
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    assert (await joiner).title == "Test Title"  # client B still gets its answer
+
+
+async def test_search_joiner_survives_creator_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same cancellation contract as video() — see that test for why."""
+
+    def slow_factory(q: str, *, filters: Any = None) -> MagicMock:
+        time.sleep(0.3)
+        return _mock_search_result()
+
+    monkeypatch.setattr(adapter, "_make_search", slow_factory)
+
+    creator = asyncio.create_task(adapter.search("q", limit=5))
+    await asyncio.sleep(0.05)
+    joiner = asyncio.create_task(adapter.search("q", limit=5))
+    await asyncio.sleep(0.05)
+    assert ("q", None, False, 5) in adapter._inflight_search
+
+    creator.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    assert [h.id for h in await joiner] == ["vid00000001"]

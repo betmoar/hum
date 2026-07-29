@@ -70,10 +70,12 @@ def test_cache_ttl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.search_cache_ttl_seconds == 300
 
 
-def test_cache_ttl_rejects_zero() -> None:
+@pytest.mark.parametrize("field", ["video_cache_ttl_seconds", "search_cache_ttl_seconds"])
+@pytest.mark.parametrize("bad", [0, 3601])
+def test_cache_ttl_rejects_out_of_range(field: str, bad: int) -> None:
     with pytest.raises(ValidationError):
         Settings(
             api_bearer_token="x" * 16,
             stream_signing_key="00" * 32,
-            video_cache_ttl_seconds=0,
+            **{field: bad},
         )

@@ -36,3 +36,4 @@ def _reset_adapter_caches() -> None:
     _yt._video_details_cache.clear()
     _yt._search_cache.clear()
     _yt._inflight_video.clear()
+    _yt._inflight_search.clear()
