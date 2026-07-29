@@ -10,7 +10,8 @@
     | 'grip-vertical'
     | 'chevron-up' | 'chevron-down'
     | 'chevron-right'
-    | 'maximize-2' | 'minimize-2';
+    | 'maximize-2' | 'minimize-2'
+    | 'airplay';
 
   type Props = {
     name: IconName;
@@ -55,5 +56,6 @@
   {:else if name === 'chevron-right'}<path d="m9 18 6-6-6-6"/>
   {:else if name === 'maximize-2'}<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>
   {:else if name === 'minimize-2'}<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/>
+  {:else if name === 'airplay'}<path d="M8.71 3H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/><path d="M19 16h2a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-3.71"/><path d="m8 19 4-4 4 4"/><line x1="12" y1="15" x2="12" y2="22"/>
   {/if}
 </svg>

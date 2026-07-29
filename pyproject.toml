@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hum"
-version = "0.1.1"
+version = "0.1.2"
 description = "Hum — a self-hosted YouTube audio streamer for the home"
 readme = "README.md"
 requires-python = ">=3.11"

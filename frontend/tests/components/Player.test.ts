@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Player from '../../src/components/Player.svelte';
@@ -227,3 +227,81 @@ describe('Player — live tracks', () => {
     expect(await findByText(/LIVE/i)).toBeInTheDocument();
   });
 });
+
+// Helper: make a VOD track with a valid-shaped signed URL.
+const liveTrack = (id: string): Track => ({
+  ...sampleTrack(id, ''),
+  isLive: true,
+  liveStreamUrl: 'https://example.com/live.m3u8',
+});
+
+describe('Player — AirPlay button', () => {
+  beforeEach(() => {
+    // jsdom has no webkit* APIs by default → button hidden.
+  });
+
+  it('does not render the airplay button when unsupported (jsdom)', async () => {
+    store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+    const { container } = render(Player);
+    await tick();
+    const btn = container.querySelector('[aria-label="AirPlay"]');
+    expect(btn).toBeNull();
+  });
+
+  it('hides the airplay button for live tracks even when supported', async () => {
+    // Simulate Safari by stamping the picker fn onto the audio element after
+    // render. Player attaches on mount; we patch the prototype before render.
+    (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker = () => {};
+    try {
+      store.playNow(liveTrack('live1'));
+      const { container } = render(Player);
+      await tick();
+      const btn = container.querySelector('[aria-label="AirPlay"]');
+      // Live tracks: hidden until §3 lands (Option C).
+      expect(btn).toBeNull();
+    } finally {
+      delete (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker;
+    }
+  });
+
+  it('shows the airplay button and calls the picker when supported + available + non-live', async () => {
+    const AVAIL = 'webkitplaybacktargetavailabilitychanged';
+    const spy = vi.fn();
+    (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker = spy;
+    try {
+      store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+      const { container } = render(Player);
+      await tick();
+      // Button absent until an availability event says a target exists.
+      let btn = container.querySelector('[aria-label="AirPlay"]');
+      expect(btn).toBeNull();
+
+      const audio = container.querySelector('audio')!;
+      audio.dispatchEvent(new CustomEvent(AVAIL, { detail: { availability: 'available' } }));
+      await tick();
+      btn = container.querySelector('[aria-label="AirPlay"]');
+      expect(btn).not.toBeNull();
+      (btn as HTMLButtonElement).click();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      delete (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker;
+    }
+  });
+
+
+  it('exposes showPlaybackTargetPicker on playerControls', async () => {
+    store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+    render(Player);
+    await tick();
+    expect(typeof playerControls.current?.showPlaybackTargetPicker).toBe('function');
+  });
+
+  it('airplayCapable stays false when unsupported so NowPlaying can gate on it', async () => {
+    // jsdom: no webkit API → airplaySupported stays false → flag stays false.
+    store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+    render(Player);
+    await tick();
+    expect(store.player.airplayCapable).toBe(false);
+  });
+});
+

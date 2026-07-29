@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-29
+
+### Added
+
+- **AirPlay from Safari to AirPlay 2 speakers** (e.g. Sonos): a per-element
+  AirPlay button in the player transport routes Hum's audio alone to the
+  speaker, replacing the system-wide macOS Sound Output route (which also
+  carries notification audio and adds scrubber latency). The button appears in
+  both the mini-player and the expanded now-playing overlay, gated on AirPlay
+  support and target availability. VOD playback routes over the existing signed
+  native-HLS URL; live tracks honestly hide the button (hls.js/MSE output can't
+  be AirPlay-routed). Frontend-only — no server changes, the speaker never
+  fetches a Hum URL (AirPlay-to-speaker is a source-encoded push). Verified
+  end-to-end against a Sonos Move.
+
 ## [0.1.1] - 2026-07-29
 
 ### Added
@@ -91,6 +106,7 @@ First tagged release of Hum — a self-hosted YouTube audio streamer.
   3.11/3.12) and frontend (svelte-check, vitest, vite build); tag-triggered
   release workflow.
 
-[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/betmoar/hum/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/betmoar/hum/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/betmoar/hum/releases/tag/v0.1.0

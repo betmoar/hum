@@ -14,6 +14,7 @@ export type PlayerControls = {
   seekBy: (deltaSeconds: number) => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
+  showPlaybackTargetPicker?: () => void;
   getPosition?: () => number;
   restoreAt?: (pos: number) => void;
 };
@@ -36,6 +37,11 @@ type PlayerState = {
   shuffle: boolean;
   repeat: 'off' | 'one' | 'all';
   isExpanded: boolean;
+  // True iff AirPlay is supported, a target is available, and the current
+  // track is routable (not live). Reactive so both Player and NowPlaying gate
+  // their buttons on the same source. Player owns the writes (derived from its
+  // airplay-control instance); NowPlaying only reads.
+  airplayCapable: boolean;
 };
 
 type Toast = {
@@ -77,7 +83,7 @@ class AppStore {
     // and skips the rehydrate refetch entirely.
     loadJson<Track[]>(KEY_QUEUE, []).map((t) => ({ ...t, audioUrl: '', hlsUrl: undefined }))
   );
-  player = $state<PlayerState>({ current: null, isPlaying: false, positionSeconds: 0, shuffle: false, repeat: 'off', isExpanded: false });
+  player = $state<PlayerState>({ current: null, isPlaying: false, positionSeconds: 0, shuffle: false, repeat: 'off', isExpanded: false, airplayCapable: false });
   toast = $state<Toast | null>(null);
 
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
