@@ -28,9 +28,4 @@ declare global {
   interface AirplayAvailabilityEvent extends Event {
     availability: 'available' | 'not-available';
   }
-
-  interface Window {
-    // The event constant is reachable on the constructor in Safari.
-    WebKitPlaybackTargetAvailabilityEvent?: typeof Event;
-  }
 }

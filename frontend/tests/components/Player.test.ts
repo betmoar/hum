@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import Player from '../../src/components/Player.svelte';
@@ -263,6 +263,31 @@ describe('Player — AirPlay button', () => {
       delete (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker;
     }
   });
+
+  it('shows the airplay button and calls the picker when supported + available + non-live', async () => {
+    const AVAIL = 'webkitplaybacktargetavailabilitychanged';
+    const spy = vi.fn();
+    (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker = spy;
+    try {
+      store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+      const { container } = render(Player);
+      await tick();
+      // Button absent until an availability event says a target exists.
+      let btn = container.querySelector('[aria-label="AirPlay"]');
+      expect(btn).toBeNull();
+
+      const audio = container.querySelector('audio')!;
+      audio.dispatchEvent(new CustomEvent(AVAIL, { detail: { availability: 'available' } }));
+      await tick();
+      btn = container.querySelector('[aria-label="AirPlay"]');
+      expect(btn).not.toBeNull();
+      (btn as HTMLButtonElement).click();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      delete (HTMLAudioElement.prototype as any).webkitShowPlaybackTargetPicker;
+    }
+  });
+
 
   it('exposes showPlaybackTargetPicker on playerControls', async () => {
     store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));

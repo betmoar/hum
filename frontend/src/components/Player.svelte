@@ -159,7 +159,7 @@
   // flag on it would never re-render NowPlaying when the availability event
   // arrives post-mount.
   let airplayCapable = $derived(
-    airplaySupported && airplay.state.available !== false && !store.player.current?.isLive
+    airplaySupported && airplay.state.available && !store.player.current?.isLive
   );
   $effect(() => {
     store.player.airplayCapable = airplayCapable;

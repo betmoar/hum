@@ -40,10 +40,6 @@ export function createAirplayControl() {
     return hasPicker(el);
   }
 
-  function isSupported(): boolean {
-    return el ? isSupportedEl(el) : false;
-  }
-
   function attach(audio: AirplayEl) {
     detach();
     el = audio;
@@ -89,7 +85,6 @@ export function createAirplayControl() {
     attach,
     detach,
     showPicker,
-    isSupported,
     isSupportedEl,
   };
 }
