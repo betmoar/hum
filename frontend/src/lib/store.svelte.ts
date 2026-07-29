@@ -14,6 +14,7 @@ export type PlayerControls = {
   seekBy: (deltaSeconds: number) => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
+  showPlaybackTargetPicker?: () => void;
   getPosition?: () => number;
   restoreAt?: (pos: number) => void;
 };

@@ -6,6 +6,10 @@
   import Icon from './Icon.svelte';
   import Marquee from './Marquee.svelte';
   import LivePill from './LivePill.svelte';
+  import { createAirplayControl } from '../lib/airplay.svelte';
+
+  const airplay = createAirplayControl();
+  let airplaySupported = $state(false);
 
   // Safari plays the HLS-wrapped AAC stream for VOD; everyone else uses the
   // direct proxy URL. canPlayType for the HLS MIME is a Safari-only signal.
@@ -110,6 +114,7 @@
       },
       setVolume: (v) => { if (el) el.volume = Math.max(0, Math.min(1, v)); },
       toggleMute: () => { if (el) el.muted = !el.muted; },
+      showPlaybackTargetPicker: () => airplay.showPicker(),
       getPosition: () => el?.currentTime ?? 0,
       restoreAt: (pos: number) => {
         const a = el;
@@ -136,6 +141,16 @@
       pendingRestore = null;
       playerControls.current = null;
     };
+  });
+
+  // Attach the AirPlay control to the live <audio> element. Lifecycle is
+  // bound to the element (not global) per Apple's battery guidance.
+  $effect(() => {
+    const a = el;
+    if (!a) return;
+    airplay.attach(a);
+    airplaySupported = airplay.isSupportedEl(a);
+    return () => airplay.detach();
   });
 
   // Reset Media Session metadata when the underlying videoId changes (not on
@@ -423,6 +438,7 @@
       onended={advance}
       onerror={handleError}
       autoplay
+      {...{ 'x-webkit-airplay': 'allow' }}
     ></audio>
 
     <div class="info">
@@ -488,6 +504,17 @@
             <Icon name="repeat" size={18} />
           {/if}
         </button>
+        {#if airplaySupported && airplay.state.available !== false && !store.player.current.isLive}
+          <button
+            class="mode airplay"
+            class:active={airplay.state.routeActive}
+            onclick={() => airplay.showPicker()}
+            aria-label="AirPlay"
+            aria-pressed={airplay.state.routeActive}
+          >
+            <Icon name="airplay" size={18} />
+          </button>
+        {/if}
       </div>
 
       {#if store.player.current.isLive}
