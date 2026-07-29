@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Design spec for AirPlay from Safari to Sonos (frontend-only): a per-element
+  AirPlay button in the player transport so Hum's audio alone routes to a
+  speaker, replacing the system-wide macOS Sound output route. Spec defines the
+  button, the VOD path (native HLS, no server change), and the live-playback
+  fallback chain (hls.js `MEDIA_ATTACHING` workaround → force native-HLS while
+  routed → hide the button for live). Reviewed by a 3-lens GLM panel.
+
 ## [0.1.1] - 2026-07-29
 
 ### Added
@@ -19,6 +28,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Adapter caches for video metadata and search results, with configurable TTLs
   (`VIDEO_CACHE_TTL_SECONDS`, `SEARCH_CACHE_TTL_SECONDS`; both clamped to 1 h).
   Repeat plays and revisited searches skip a full pytubefix fetch.
+- Architecture invariants enforced as tests (`tests/unit/test_invariants.py`).
+- `scripts/check.sh` — the single pre-push gate mirroring CI.
+- Maintainer handoff docs: `CLAUDE.md`, `docs/PLAYBOOKS.md`, `docs/BACKLOG.md`.
+- Ruff now lints tests in CI (with test-appropriate ignores).
 
 ### Fixed
 
@@ -53,13 +66,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Upstream host allowlist is enforced on every redirect hop (SSRF hardening).
 - `/api/debug/live/*` is gated on `DEBUG=true` (it exposes raw CDN URLs).
 - Docker image runs as a non-root user.
-
-### Added
-
-- Architecture invariants enforced as tests (`tests/unit/test_invariants.py`).
-- `scripts/check.sh` — the single pre-push gate mirroring CI.
-- Maintainer handoff docs: `CLAUDE.md`, `docs/PLAYBOOKS.md`, `docs/BACKLOG.md`.
-- Ruff now lints tests in CI (with test-appropriate ignores).
 
 ## [0.1.0] - 2026-05-30
 
