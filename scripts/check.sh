@@ -18,9 +18,14 @@ esac
 fail() { echo "✗ $1 failed — fix before pushing." >&2; exit 1; }
 
 if [ "$want" = "fast" ]; then
-  # Inner-loop mode: assumes a previously-synced .venv (uv errors clearly if
-  # it's missing — run ./scripts/setup.sh first). --no-sync is load-bearing:
-  # plain `uv run` re-syncs on a stale lockfile, defeating the fast path.
+  # Inner-loop mode: assumes a previously-synced .venv. If one is missing,
+  # `uv run --no-sync` does NOT error — it creates an EMPTY venv and every
+  # check below then fails with confusing import errors, so we check first.
+  # --no-sync is load-bearing: plain `uv run` re-syncs on a stale lockfile,
+  # defeating the fast path.
+  if [ ! -x .venv/bin/python ]; then
+    echo "no synced .venv — run ./scripts/setup.sh first" >&2; exit 1
+  fi
   echo "── fast: ruff ─────────────────────────────────────────"
   uv run --no-sync ruff check . || fail "ruff"
   echo "── fast: mypy --strict ────────────────────────────────"
@@ -38,7 +43,9 @@ if [ "$want" != "frontend" ]; then
     echo "uv not found. Install it: https://docs.astral.sh/uv/" >&2; exit 1
   fi
   stamp=".venv/.sync-stamp"
-  if [ ! -f "$stamp" ] || [ uv.lock -nt "$stamp" ] || [ pyproject.toml -nt "$stamp" ]; then
+  # Quoted so a missing uv.lock/pyproject.toml can't make `-nt` quietly report
+  # "unchanged" and skip a sync that was actually needed.
+  if [ ! -f "$stamp" ] || [ "uv.lock" -nt "$stamp" ] || [ "pyproject.toml" -nt "$stamp" ]; then
     echo "── backend: sync deps (dev extras) ────────────────────"
     uv sync --extra dev || fail "uv sync"
     touch "$stamp"
