@@ -250,14 +250,18 @@
 
       <!-- AirPlay: opens Safari's system picker via the shared playerControls
            method (the <audio> element lives in Player.svelte). Active/route
-           state is owned there; this surface is intentionally stateless. -->
-      <button
-        class="mode airplay"
-        aria-label="AirPlay"
-        onclick={() => playerControls.current?.showPlaybackTargetPicker?.()}
-      >
-        <Icon name="airplay" size={24} />
-      </button>
+           state is owned there; this surface is intentionally stateless.
+           airplayCapable gates it so the button never shows when AirPlay is
+           unsupported, no target is available, or the track is live. -->
+      {#if playerControls.current?.airplayCapable}
+        <button
+          class="mode"
+          aria-label="AirPlay"
+          onclick={() => playerControls.current?.showPlaybackTargetPicker?.()}
+        >
+          <Icon name="airplay" size={24} />
+        </button>
+      {/if}
       </div>
     </div>
     <!-- Focus sentinel: catches Tab at the bottom boundary -->

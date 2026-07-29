@@ -15,6 +15,10 @@ export type PlayerControls = {
   setVolume: (v: number) => void;
   toggleMute: () => void;
   showPlaybackTargetPicker?: () => void;
+  // True iff AirPlay is supported, a target is available, and the current
+  // track is routable (not live). NowPlaying gates its button on this so the
+  // overlay never shows an AirPlay button that no-ops on click.
+  airplayCapable?: boolean;
   getPosition?: () => number;
   restoreAt?: (pos: number) => void;
 };

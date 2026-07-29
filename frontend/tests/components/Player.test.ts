@@ -270,4 +270,13 @@ describe('Player — AirPlay button', () => {
     await tick();
     expect(typeof playerControls.current?.showPlaybackTargetPicker).toBe('function');
   });
+
+  it('airplayCapable is undefined when unsupported so NowPlaying can gate on it', async () => {
+    // jsdom: no webkit API → airplaySupported stays false → flag must be falsy
+    // (undefined), which NowPlaying uses to hide its button.
+    store.playNow(sampleTrack('abc', '/proxy/audio/abc?itag=140&exp=1&sig=' + 'a'.repeat(32)));
+    render(Player);
+    await tick();
+    expect(playerControls.current?.airplayCapable).toBeFalsy();
+  });
 });

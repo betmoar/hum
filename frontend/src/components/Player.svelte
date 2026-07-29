@@ -153,6 +153,16 @@
     return () => airplay.detach();
   });
 
+  // Mirror AirPlay capability onto playerControls so NowPlaying (which has no
+  // airplay-control instance of its own) can gate its button on the same
+  // conditions Player uses, and never render a button that no-ops on click.
+  let airplayCapable = $derived(
+    airplaySupported && airplay.state.available !== false && !store.player.current?.isLive
+  );
+  $effect(() => {
+    if (playerControls.current) playerControls.current.airplayCapable = airplayCapable;
+  });
+
   // Reset Media Session metadata when the underlying videoId changes (not on
   // every recovery URL swap).
   let currentVideoId = $derived(store.player.current?.videoId ?? null);
@@ -504,9 +514,9 @@
             <Icon name="repeat" size={18} />
           {/if}
         </button>
-        {#if airplaySupported && airplay.state.available !== false && !store.player.current.isLive}
+        {#if airplayCapable}
           <button
-            class="mode airplay"
+            class="mode"
             class:active={airplay.state.routeActive}
             onclick={() => airplay.showPicker()}
             aria-label="AirPlay"
