@@ -6,8 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-29
+
+### Added
+
+- One-command setup: `scripts/setup.sh` (secrets + backend + frontend deps),
+  with `--secrets-only` / `--dev` / `--prod` flags. README leads with the Docker
+  and uv paths.
+- `scripts/check.sh fast` — inner-loop mode (ruff, mypy, pytest without
+  coverage, vitest). Not a pre-push substitute. The full gate now skips
+  `uv sync` when `uv.lock`/`pyproject.toml` are unchanged.
+- Adapter caches for video metadata and search results, with configurable TTLs
+  (`VIDEO_CACHE_TTL_SECONDS`, `SEARCH_CACHE_TTL_SECONDS`; both clamped to 1 h).
+  Repeat plays and revisited searches skip a full pytubefix fetch.
+
 ### Fixed
 
+- Single-flight fetches no longer collapse when one caller disconnects: callers
+  await through `asyncio.shield`, so a cancelled request can't cancel the shared
+  task other callers are waiting on. Previously an unlucky caller received
+  `CancelledError` — a `BaseException` that escapes the global handlers, giving
+  the client a torn connection instead of a mapped 4xx/5xx.
+- `search()` gained single-flight; concurrent identical queries no longer each
+  hit pytubefix.
+- `SearchHit` is immutable, so a caller can't mutate a cached hit in place and
+  poison later cache reads.
+- Expired metadata-cache entries are now swept on the metadata path too; a
+  session that only read metadata previously never triggered a sweep.
+- `scripts/check.sh fast` fails with a clear message when `.venv` is missing
+  instead of creating an empty one and failing on imports.
 - Upstream failures no longer surface as bare 500s: pytubefix errors are mapped to
   `YouTubeError` in the adapter and handled globally (`404 VIDEO_UNAVAILABLE`,
   `503 YOUTUBE_BLOCKED`, `502 UPSTREAM_FAILURE` / `UPSTREAM_UNREACHABLE`).
@@ -64,5 +91,6 @@ First tagged release of Hum — a self-hosted YouTube audio streamer.
   3.11/3.12) and frontend (svelte-check, vitest, vite build); tag-triggered
   release workflow.
 
-[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/betmoar/hum/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/betmoar/hum/releases/tag/v0.1.0

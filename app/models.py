@@ -3,12 +3,19 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 VideoID = Annotated[str, Field(min_length=11, max_length=11, pattern=r"^[A-Za-z0-9_-]{11}$")]
 
 
 class SearchHit(BaseModel):
+    # Frozen because the adapter's search cache hands out SHALLOW list copies —
+    # the SearchHit instances themselves are shared across every cache hit for a
+    # key. In-place mutation of one (the way /api/video signs VideoDetails by
+    # mutation) would poison the cache for all later readers. Freezing turns
+    # that into an immediate error instead of a silent corruption.
+    model_config = ConfigDict(frozen=True)
+
     kind: Literal["video", "channel", "playlist"]
     id: str
     title: str

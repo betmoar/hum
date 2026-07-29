@@ -27,6 +27,7 @@ try:
 except Exception:
     _encode_protobuf = None
 
+from app.config import get_settings
 from app.models import (
     AudioFormat,
     ChannelInfo,
@@ -53,6 +54,28 @@ _inflight_refresh: dict[str, asyncio.Task[None]] = {}
 # Long enough to cover a typical listening session without forcing a pytubefix
 # re-fetch (which is expensive: HTTPS + Node cipher deobfuscation).
 _CACHE_MAX_TTL = 3600.0  # 1 hour
+
+# Cache: video_id -> (VideoDetails, expiry_epoch). Holds the canonical UNSIGNED
+# copy — /api/video signs by MUTATING the object it gets, so readers always
+# receive model_copy(deep=True), never the cached instance. Live videos are
+# never stored (post-fetch discard: live state goes stale fast) — but they
+# still go through the single-flight join in video(); only the cache *write*
+# is skipped. The clamp to _CACHE_MAX_TTL is for metadata freshness
+# (title/views/format availability drift) — the cached proxy paths are
+# unsigned and stable, with no expiry coupling to _stream_url_cache.
+_video_details_cache: dict[str, tuple[VideoDetails, float]] = {}
+
+# Cache: (query, category, live, limit) -> (hits, expiry_epoch). Read/write
+# logic lives in search(); swept by _evict_expired.
+_search_cache: dict[tuple[str, str | None, bool, int], tuple[list[SearchHit], float]] = {}
+
+# In-flight video() fetches, keyed by video_id — same single-flight shape as
+# _inflight_refresh. Self-cleaning: popped in a done-callback.
+_inflight_video: dict[str, asyncio.Task[VideoDetails]] = {}
+
+# In-flight search() fetches, keyed by the same tuple as _search_cache.
+# Self-cleaning: popped in a done-callback.
+_inflight_search: dict[tuple[str, str | None, bool, int], asyncio.Task[list[SearchHit]]] = {}
 
 
 class YouTubeError(Exception):
@@ -148,6 +171,37 @@ async def search(
     category: str | None = None,
     live: bool = False,
 ) -> list[SearchHit]:
+    cache_key = (query, category, live, limit)
+    cached = _search_cache.get(cache_key)
+    if cached and cached[1] > time.time():
+        # Shallow list copy: a caller may reorder/filter its own list, but the
+        # SearchHits inside are shared with the cache — SearchHit is frozen so
+        # in-place mutation raises rather than poisoning them.
+        return list(cached[0])
+    # Single-flight, same shape and rationale as video(): concurrent identical
+    # queries (two tabs, a retry after a slow response) collapse onto one
+    # pytubefix fetch instead of stampeding.
+    task = _inflight_search.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(_run_search(query, limit, category=category, live=live,
+                                               cache_key=cache_key))
+        _inflight_search[cache_key] = task
+        task.add_done_callback(_release_inflight_search)
+    # shield: see video() — one caller's cancellation must not cancel the fetch
+    # that other callers are waiting on.
+    return list(await asyncio.shield(task))
+
+
+async def _run_search(
+    query: str,
+    limit: int,
+    *,
+    category: str | None,
+    live: bool,
+    cache_key: tuple[str, str | None, bool, int],
+) -> list[SearchHit]:
+    """The uncached search fetch. Split out of search() so the whole two-step
+    fetch runs inside one single-flight task."""
     raw_filters = _build_search_filters(category=category, live=live)
     pytubefix_filters: dict[str, Any] | None = None
     wants_music = False
@@ -161,14 +215,58 @@ async def search(
         # it with the music-topic field merged in. On encoder failure, leave
         # `s.filter` untouched so the search degrades to type=Video + features.
         _inject_music_topic(s, pytubefix_filters)
-    return await _to_thread_mapped(_collect_search_hits, s, limit)
+    return await _to_thread_mapped(_collect_and_cache_search, s, limit, cache_key)
+
+
+def _release_inflight(registry: dict[Any, Any], task: asyncio.Task[Any]) -> None:
+    """Done-callback for a single-flight task: drop its registry entry, then
+    mark its exception observed.
+
+    That second step is not bookkeeping. Callers await these tasks through
+    asyncio.shield, so a task whose callers were ALL cancelled has nobody left
+    to retrieve its result, and asyncio logs "Task exception was never
+    retrieved" at GC time for any failure. Reading it here marks it observed.
+    """
+    for key, inflight in list(registry.items()):
+        if inflight is task:
+            registry.pop(key, None)
+            break
+    if not task.cancelled():
+        task.exception()
+
+
+def _release_inflight_video(task: asyncio.Task[VideoDetails]) -> None:
+    _release_inflight(_inflight_video, task)
+
+
+def _release_inflight_search(task: asyncio.Task[list[SearchHit]]) -> None:
+    _release_inflight(_inflight_search, task)
 
 
 async def video(video_id: str) -> VideoDetails:
-    # The construction + stream iteration both touch network + Node-cipher work,
-    # so they MUST run off the event loop. Combining into one to_thread keeps the
-    # event loop unblocked for concurrent requests.
-    return await _to_thread_mapped(_fetch_video, video_id)
+    # Metadata cache hit: deep-copy so per-request signing can't touch the
+    # cached canonical (see _video_details_cache comment).
+    cached = _video_details_cache.get(video_id)
+    if cached and cached[1] > time.time():
+        return cached[0].model_copy(deep=True)
+    # Single-flight: concurrent misses for the same id share one fetch. The
+    # check-and-create is atomic within the event loop (no await between the
+    # .get() and the assignment), mirroring _refresh_cache_once.
+    task = _inflight_video.get(video_id)
+    if task is None:
+        task = asyncio.create_task(_to_thread_mapped(_fetch_video_cached, video_id))
+        _inflight_video[video_id] = task
+        # Only the creator clears the entry — a joiner popping it would let a
+        # later caller start a second fetch while this one is still running.
+        task.add_done_callback(_release_inflight_video)
+    # shield() so one caller's cancellation (client disconnect mid-fetch) can't
+    # cancel the SHARED task out from under every other caller waiting on it.
+    # Without it, an unlucky joiner gets CancelledError — which is BaseException,
+    # so it escapes every handler in app.main and the client gets a torn
+    # connection instead of the mapped 4xx/5xx the frontend recovers from.
+    # Copy on the way out: the caller signs by mutating what it receives, and
+    # all callers here share one task result.
+    return (await asyncio.shield(task)).model_copy(deep=True)
 
 
 async def channel(channel_id: str) -> ChannelInfo:
@@ -270,6 +368,20 @@ def _fetch_video(video_id: str) -> VideoDetails:
     return _normalise_video(video_id, yt)
 
 
+def _fetch_video_cached(video_id: str) -> VideoDetails:
+    """_fetch_video plus the metadata-cache write. Runs in a to_thread worker
+    (construction + stream iteration touch network + Node-cipher work)."""
+    details = _fetch_video(video_id)
+    if not details.is_live:
+        ttl = min(float(get_settings().video_cache_ttl_seconds), _CACHE_MAX_TTL)
+        _video_details_cache[video_id] = (details.model_copy(deep=True), time.time() + ttl)
+    # Sweep here too: a metadata-only session (repeated /api/video with no
+    # playback and no search) reaches neither of the other two sweep sites, so
+    # without this _video_details_cache would accumulate expired entries.
+    _evict_expired()
+    return details
+
+
 def _fetch_live_manifest(video_id: str) -> LiveStreamInfo | None:
     """Read the live HLS manifest URL from pytubefix's vid_info, bypassing
     `check_availability()` which raises `LiveStreamError` for live videos.
@@ -313,19 +425,34 @@ def _refresh_cache(video_id: str) -> None:
 
 
 def _evict_expired(now: float | None = None) -> None:
-    """Drop expired entries from the stream URL cache.
+    """Drop expired entries from all adapter caches.
 
-    Without this the cache grows unbounded over a long-running process — every
-    (video_id, itag) ever requested would linger forever. Called after each
-    refresh (i.e. on a cache miss, already off the hot path). We snapshot the
-    keys first: refreshes run in asyncio.to_thread workers, so a concurrent
-    writer could otherwise mutate the dict mid-iteration.
+    Without this the caches grow unbounded over a long-running process.
+    Called off the request hot path, from all three cache-write sites: after a
+    stream-URL refresh (_refresh_cache), after a metadata fetch
+    (_fetch_video_cached), and after a search-cache write
+    (_collect_and_cache_search). Each of those is already a cache MISS, so the
+    sweep never runs on a hit. All three are needed: a session that only
+    searches, or only reads metadata, reaches just one of them.
+
+    Keys are snapshotted first: writers run in asyncio.to_thread workers, so a
+    concurrent writer could otherwise mutate a dict mid-iteration.
+
+    Note this evicts only EXPIRED entries — there is no cap on live entries
+    within a TTL window. Bounded in practice by _CACHE_MAX_TTL (1 h) and the
+    single-user threat model; revisit if either changes.
     """
     cutoff = now if now is not None else time.time()
-    for key in list(_stream_url_cache.keys()):
-        entry = _stream_url_cache.get(key)
-        if entry is not None and entry[1] <= cutoff:
-            _stream_url_cache.pop(key, None)
+    caches: tuple[dict[Any, Any], ...] = (
+        _stream_url_cache,
+        _video_details_cache,
+        _search_cache,
+    )
+    for cache in caches:
+        for key in list(cache.keys()):
+            entry = cache.get(key)
+            if entry is not None and entry[1] <= cutoff:
+                cache.pop(key, None)
 
 
 # ---- Normalisation -------------------------------------------------------
@@ -523,6 +650,24 @@ def _collect_search_hits(s: Any, limit: int) -> list[SearchHit]:
             hits.append(hit)
             if len(hits) >= limit:
                 return hits
+    return hits
+
+
+def _collect_and_cache_search(
+    s: Any, limit: int, cache_key: tuple[str, str | None, bool, int]
+) -> list[SearchHit]:
+    """_collect_search_hits plus the search-cache write and an eviction sweep.
+
+    Runs in a to_thread worker (hit collection is the network-lazy part).
+    The sweep runs HERE because a search-only session never reaches
+    _refresh_cache — without it the search cache would grow unbounded.
+    """
+    hits = _collect_search_hits(s, limit)
+    # Clamped like the video-metadata TTL: an operator-set value is defence in
+    # depth away from serving hours-stale search results.
+    ttl = min(float(get_settings().search_cache_ttl_seconds), _CACHE_MAX_TTL)
+    _search_cache[cache_key] = (list(hits), time.time() + ttl)
+    _evict_expired()
     return hits
 
 

@@ -10,7 +10,7 @@ if [ ! -d frontend/node_modules ]; then
 fi
 
 if [ ! -d .venv ]; then
-  echo "no .venv found — create one with: python3.11 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'"
+  echo "no .venv found — run ./scripts/setup.sh first"
   exit 1
 fi
 
@@ -18,5 +18,5 @@ fi
 source .venv/bin/activate
 
 (cd frontend && npm run dev) &
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 &
+uvicorn app.main:app --reload --reload-dir app --host 127.0.0.1 --port 8000 &
 wait
