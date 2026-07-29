@@ -36,9 +36,16 @@ Two consequences that shape the whole design:
 
 ⚠️ Consequence 1 is inferred from documented protocol behavior, not measured on
 this app. **Task 0 of the plan is to verify it empirically** before building on
-it. If VOD-over-AirPlay turns out to need a LAN-reachable origin, the scope
-grows substantially (bind address, CORS origins, signed-URL audience) and this
-design should be revisited rather than patched.
+it, with an explicit falsifier:
+
+- **Pass:** with `HOST=127.0.0.1` unchanged, AirPlay a VOD track from Safari to
+  the Sonos — audio plays. (The speaker never fetched a Hum URL.)
+- **Fail:** Safari or the Sonos attempts a request to a `127.0.0.1` URL it
+  would have to resolve — i.e. the route only works if the receiver can reach
+  the origin. Watch the browser network panel and the Sonos for any such fetch.
+
+If Task 0 fails, the scope grows substantially (bind address, CORS origins,
+signed-URL audience) and this design should be revisited rather than patched.
 
 ## Scope
 
@@ -70,6 +77,15 @@ Design decisions:
   there's no separate "query current state" call.
 - **Button is hidden, not disabled, when unavailable.** Every non-Safari browser
   reports nothing here; a permanently-disabled button in Chrome is noise.
+- **Disconnect mid-playback:** when the wireless route drops mid-track (Sonos
+  powered off, network blip), `webkitcurrentplaybacktargetiswirelesschanged`
+  fires and the button reverts to inactive. Local playback **continues at the
+  current position** — no stall, no restart. The route is not auto-re-engaged;
+  the user re-taps if they want it back.
+- **Track-skip while routed:** the route persists across track changes — the new
+  track plays on the Sonos. `src` swaps via `pickVodSrc` must not tear the route
+  down; this is verified alongside the recovery-swap case in Task 3, since both
+  are src-swap events.
 - **`x-webkit-airplay="allow"`** on the `<audio>` element.
 - **TypeScript declarations are required, not optional.** `svelte-check` runs in
   the gate (`scripts/check.sh`), so a `.d.ts` augmenting `HTMLAudioElement` with
@@ -88,10 +104,14 @@ is true there. That is a plain, receiver-fetchable, non-MSE source, which is
 exactly what the route wants.
 
 The one thing to verify: the signed HLS URL carries an expiry
-(`stream_url_ttl_seconds`, default 6 h). If the route survives past expiry, the
-element errors and `handleError` (`Player.svelte:327+`) does its refetch dance —
-which swaps `src`, which **drops the AirPlay route**. Task 3 covers re-asserting
-the route after a recovery swap, or accepting the drop and documenting it.
+(`stream_url_ttl_seconds`, default 6 h). If a session outlasts it, the element
+errors and `handleError` (`Player.svelte:327+`) does its refetch dance — which
+swaps `src`, which **drops the AirPlay route**. (The expiry is on the signed
+URL, not on the route itself; the Mac has already been fetching and re-encoding,
+so it bites when the element re-requests segments, not on every packet.)
+Task 3 **auto re-asserts** the route after the recovery swap completes, so
+playback continues uninterrupted on the Sonos. The re-assert is verified as part
+of the same src-swap test as track-skip (§1), since both are src-swap events.
 
 ## Section 3 — Live (the path that breaks)
 
@@ -122,17 +142,69 @@ The fallback if A and B both fail.
 silent failure.** Whichever lands, the button's state must tell the truth about
 whether the route will work.
 
+**Pass/fail per option** (the observable that triggers fallback to the next):
+- **A passes iff:** with hls.js attached and a target connected,
+  `webkitCurrentPlaybackTargetIsWireless === true` **and** audio is audible on
+  the Sonos through a 60s live segment with no fatal `Hls.Error`. If audio
+  never surfaces or a fatal error fires within that window → A fails, try B.
+- **B passes iff:** after tearing down hls.js and setting `audio.src = src`,
+  the same target-connected + audible-for-60s contract holds. Re-attach of
+  hls.js on disconnect must resume at the live edge (no stall, no manual seek).
+- **C** is unconditional — live tracks simply don't show the button.
+
 ## Testing
 
-- **Unit (vitest):** button visibility against mocked availability events;
-  cleanup detaches listeners; live-track behavior matches whichever option
-  landed. The WebKit APIs are absent in jsdom, so they get mocked onto the
-  element — this tests our logic, not Safari.
-- **Manual, and it is the real gate.** None of this is verifiable in CI: no
-  Safari, no Sonos. A `docs/PLAYBOOKS.md` entry should cover: VOD route +
-  disconnect, live behavior, expiry recovery while routed, and the non-Safari
-  no-button case. Manual verification is load-bearing here in a way it isn't
-  elsewhere in this repo.
+**Unit (vitest)** — what it observably proves, and what it doesn't:
+- The WebKit APIs are absent in jsdom, so they get mocked onto the element.
+  This tests **our logic, not Safari**: it proves that given a mocked
+  `availability` event the button's bound `hidden` state flips, and that after
+  unmount a further dispatch no longer mutates state (detach **by behaviour**,
+  not by a `removeEventListener` spy — a spy only proves the call was made, not
+  that the name matched a registered listener).
+- It does **not** prove: that the listener registers on the real Safari element,
+  that `webkitShowPlaybackTargetPicker` is called inside a user gesture (jsdom
+  has no gesture semantics), or that detach removes the Safari-side listener by
+  name. Those are manual.
+- Cases: dispatch `webkitplaybacktargetavailabilitychanged` with `"available"` →
+  button `hidden` is false; dispatch `"not-available"` → true; after unmount,
+  the same dispatch is a no-op; the magic string `webkitplaybacktargetavailabilitychanged`
+  is asserted verbatim (it appears four times across four identifiers; a typo
+  would pass jsdom silently).
+
+**Feature-detection contract** (the minimum API subset, testable as a pure
+boolean `airplaySupported(el)`):
+- Button **renders** iff `el.webkitShowPlaybackTargetPicker` is a function. This
+  is the minimum.
+- Button is **functional** iff that *plus* the `availability`-event mechanism is
+  present (the event name constant is reachable). Partial support — picker
+  present but no `availabilitychanged` — renders the button but leaves it
+  permanently in its initial state; treat as unsupported and hide.
+- The standard `remote.prompt()` (Remote Playback API) is feature-detected
+  alongside, so a future standards-based path is a small edit. If both exist,
+  prefer the WebKit API on Safari (the standard is poorly adopted there).
+
+**Manual, and it is the real gate.** None of this is verifiable in CI: no
+Safari, no Sonos. The gate is a binary-outcome checklist, **with the Sonos model
+and firmware recorded alongside the results** so it's reproducible. Minimum
+entries:
+
+1. **Task 0 (no-server-change premise):** `HOST=127.0.0.1` unchanged, AirPlay a
+   VOD track from Safari → Sonos. Pass = audio plays and the browser/Sonos makes
+   **no** fetch to a `127.0.0.1` URL. Fail = such a fetch appears.
+2. **VOD route:** open picker → Sonos appears in list within ~2s → select →
+   audio surfaces from the speaker, system output unchanged.
+3. **Disconnect mid-playback:** pull the route (power off Sonos / network blip)
+   → button reverts to inactive, local playback continues at current position.
+4. **Track-skip while routed:** next track → audio continues on the Sonos (route
+   persists).
+5. **Expiry recovery while routed:** force URL expiry → `handleError` recovery
+   swap fires → route auto re-asserts → audio continues on the Sonos.
+6. **Live (whichever of A/B/C landed):** per the §3 pass/fail contract.
+7. **Non-Safari (negative):** open in Chrome → no AirPlay button renders.
+
+Record results against a named Sonos model (e.g. `Sonos Era 100, S2 15.x`).
+A `docs/PLAYBOOKS.md` entry names this checklist so a CI grep can confirm it
+landed.
 
 ## Risks
 
@@ -140,7 +212,7 @@ whether the route will work.
 |---|---|
 | The no-server-change premise (§Problem) is wrong. | Task 0 verifies before anything is built. If wrong, revisit this design. |
 | Live can't be routed at all. | Option C — hide the button — is always available and always honest. |
-| Expiry recovery drops the route mid-listen. | Task 3; may end up documented rather than fixed. |
+| Expiry recovery drops the route mid-listen. | Task 3 auto-re-asserts the route after the recovery swap (decided — see §2). |
 | WebKit APIs are non-standard and unversioned. | Feature-detect every one; also detect the standard `remote.prompt()` so a future standards-based path is a small edit. |
 | Sonos's AirPlay 2 implementation differs from a HomePod's. | Manual testing is against the actual target hardware, not a proxy. |
 
@@ -150,3 +222,36 @@ This adds no server surface, no new route, no new signed-URL type, and no change
 to `app/models.py` / `frontend/src/lib/types.ts`. If an implementation finds
 itself touching any of those, that's a signal the premise in §Problem broke —
 stop and revisit.
+
+## Clarifications (2026-07-29)
+
+From the GLM review panel (3 lenses). Resolved findings folded into the body
+above; the four product/build decisions recorded here.
+
+- **Q (lens A/B/C): track-skip while routed** → **A:** the route persists across
+  track changes; the new track plays on the Sonos. Matches native-media-app
+  behaviour. `src` swaps via `pickVodSrc` must not tear the route down — verify
+  in Task 3 alongside the recovery-swap case, since both are src-swap events.
+- **Q (lens A/C): expiry-induced recovery swap drops the route** → **A:** auto
+  re-assert. After `handleError`'s `src` swap completes, programmatically
+  re-engage the AirPlay route so playback continues uninterrupted on the Sonos.
+  Replaces the "or accept the drop and document it" hedge in §2.
+- **Q (lens C): live A→B→C sequencing needs hardware** → **A:** the dev machine
+  is a Mac — Safari is local, so validation does not block on external hardware.
+  Withdraw the C-first-MVP recommendation: build the full A→B→C chain and
+  validate locally. (Sonos is still required for the final manual gate, but not
+  for iterating on the hls.js workaround.)
+- **Q (lens B): AirPlay picker entry across both surfaces** → **A:** add a new
+  `playerControls` method (`showPlaybackTargetPicker`). `NowPlaying.svelte`
+  reaches the element via `document.querySelector('audio')` for scrub/restart
+  (`NowPlaying.svelte:17,47,59`), not through `playerControls` — the AirPlay
+  action gets a shared entry point instead, matching the `toggle()` pattern
+  (`store.svelte.ts:24`, `NowPlaying.svelte:54`).
+
+## Panel follow-ups
+
+All four must-resolve / should-clarify items from the run report have been
+folded into the body: Task 0 falsifier (§Problem), option pass/fail contract
+(§3), disconnect mid-playback (§1), and the manual-gate checklist + feature-detect
+contract + vitest scope (§Testing). The risk table's expiry row was updated to
+match the auto-re-assert decision.
