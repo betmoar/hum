@@ -247,6 +247,17 @@
           <Icon name="repeat" size={24} />
         {/if}
       </button>
+
+      <!-- AirPlay: opens Safari's system picker via the shared playerControls
+           method (the <audio> element lives in Player.svelte). Active/route
+           state is owned there; this surface is intentionally stateless. -->
+      <button
+        class="mode airplay"
+        aria-label="AirPlay"
+        onclick={() => playerControls.current?.showPlaybackTargetPicker?.()}
+      >
+        <Icon name="airplay" size={24} />
+      </button>
       </div>
     </div>
     <!-- Focus sentinel: catches Tab at the bottom boundary -->
