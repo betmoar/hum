@@ -44,6 +44,11 @@ _ENTRY_KEYS = (
 def _scrub_url(url: str, format_id: str) -> str:
     m = re.search(r"[?&/]expire[=/](\d+)", url)
     expire = m.group(1) if m else "0"
+    if urllib.parse.urlparse(url).hostname == "manifest.googlevideo.com":
+        # Live HLS master: keep the manifest shape the adapter relies on
+        # (host, path-style /expire/, .m3u8), drop ip/sig/ids.
+        return (f"https://manifest.googlevideo.com/api/manifest/hls_variant/expire/{expire}"
+                f"/itag/{format_id}/file/index.m3u8")
     return f"https://rr1---sn.googlevideo.com/videoplayback?itag={format_id}&expire={expire}"
 
 

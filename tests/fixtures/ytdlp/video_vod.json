@@ -5,7 +5,7 @@
  "uploader": "Rick Astley",
  "channel_id": "UCuAXFkgsw1L7xaCfnd5JJOw",
  "duration": 213,
- "view_count": 1819377077,
+ "view_count": 1819389042,
  "live_status": "not_live",
  "description": "The official video for “Never Gonna Give You Up” by Rick Astley. \n\nNever: The Autobiography 📚 OUT NOW! \nFollow this link to get your copy and listen to Rick’s ‘Never’ playlist ❤️ #RickAstleyNever\nhttp",
  "formats": [
@@ -68,8 +68,8 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/233/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/233/file/index.m3u8"
   },
   {
    "format_id": "234",
@@ -78,8 +78,8 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/234/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/234/file/index.m3u8"
   },
   {
    "format_id": "139",
@@ -94,7 +94,7 @@
    "width": null,
    "height": null,
    "fps": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=139&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=139&expire=1790277802"
   },
   {
    "format_id": "249",
@@ -109,7 +109,7 @@
    "width": null,
    "height": null,
    "fps": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=249&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=249&expire=1790277802"
   },
   {
    "format_id": "250",
@@ -124,7 +124,7 @@
    "width": null,
    "height": null,
    "fps": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=250&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=250&expire=1790277802"
   },
   {
    "format_id": "140",
@@ -139,7 +139,7 @@
    "width": null,
    "height": null,
    "fps": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=140&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=140&expire=1790277802"
   },
   {
    "format_id": "251",
@@ -154,7 +154,7 @@
    "width": null,
    "height": null,
    "fps": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=251&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=251&expire=1790277802"
   },
   {
    "format_id": "602",
@@ -167,8 +167,8 @@
    "width": 256,
    "height": 144,
    "fps": 13.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=602&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=602&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/602/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/602/file/index.m3u8"
   },
   {
    "format_id": "269",
@@ -181,8 +181,8 @@
    "width": 256,
    "height": 144,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/269/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/269/file/index.m3u8"
   },
   {
    "format_id": "160",
@@ -197,7 +197,7 @@
    "width": 256,
    "height": 144,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=160&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=160&expire=1790277802"
   },
   {
    "format_id": "603",
@@ -210,8 +210,8 @@
    "width": 256,
    "height": 144,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=603&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=603&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/603/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/603/file/index.m3u8"
   },
   {
    "format_id": "278",
@@ -226,7 +226,7 @@
    "width": 256,
    "height": 144,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=278&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=278&expire=1790277802"
   },
   {
    "format_id": "394",
@@ -241,7 +241,7 @@
    "width": 256,
    "height": 144,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=394&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=394&expire=1790277802"
   },
   {
    "format_id": "229",
@@ -254,8 +254,8 @@
    "width": 426,
    "height": 240,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/229/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/229/file/index.m3u8"
   },
   {
    "format_id": "133",
@@ -270,7 +270,7 @@
    "width": 426,
    "height": 240,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=133&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=133&expire=1790277802"
   },
   {
    "format_id": "604",
@@ -283,8 +283,8 @@
    "width": 426,
    "height": 240,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=604&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=604&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/604/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/604/file/index.m3u8"
   },
   {
    "format_id": "242",
@@ -299,7 +299,7 @@
    "width": 426,
    "height": 240,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=242&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=242&expire=1790277802"
   },
   {
    "format_id": "395",
@@ -314,7 +314,7 @@
    "width": 426,
    "height": 240,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=395&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=395&expire=1790277802"
   },
   {
    "format_id": "230",
@@ -327,8 +327,8 @@
    "width": 640,
    "height": 360,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/230/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/230/file/index.m3u8"
   },
   {
    "format_id": "134",
@@ -343,7 +343,7 @@
    "width": 640,
    "height": 360,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=134&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=134&expire=1790277802"
   },
   {
    "format_id": "18",
@@ -358,7 +358,7 @@
    "width": 640,
    "height": 360,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=18&expire=1790274248"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=18&expire=1790277800"
   },
   {
    "format_id": "605",
@@ -371,8 +371,8 @@
    "width": 640,
    "height": 360,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=605&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=605&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/605/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/605/file/index.m3u8"
   },
   {
    "format_id": "243",
@@ -387,7 +387,7 @@
    "width": 640,
    "height": 360,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=243&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=243&expire=1790277802"
   },
   {
    "format_id": "396",
@@ -402,7 +402,7 @@
    "width": 640,
    "height": 360,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=396&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=396&expire=1790277802"
   },
   {
    "format_id": "231",
@@ -415,8 +415,8 @@
    "width": 854,
    "height": 480,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/231/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/231/file/index.m3u8"
   },
   {
    "format_id": "135",
@@ -431,7 +431,7 @@
    "width": 854,
    "height": 480,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=135&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=135&expire=1790277802"
   },
   {
    "format_id": "606",
@@ -444,8 +444,8 @@
    "width": 854,
    "height": 480,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=606&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=606&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/606/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/606/file/index.m3u8"
   },
   {
    "format_id": "244",
@@ -460,7 +460,7 @@
    "width": 854,
    "height": 480,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=244&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=244&expire=1790277802"
   },
   {
    "format_id": "397",
@@ -475,7 +475,7 @@
    "width": 854,
    "height": 480,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=397&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=397&expire=1790277802"
   },
   {
    "format_id": "232",
@@ -488,8 +488,8 @@
    "width": 1280,
    "height": 720,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/232/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/232/file/index.m3u8"
   },
   {
    "format_id": "136",
@@ -504,7 +504,7 @@
    "width": 1280,
    "height": 720,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=136&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=136&expire=1790277802"
   },
   {
    "format_id": "609",
@@ -517,8 +517,8 @@
    "width": 1280,
    "height": 720,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=609&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=609&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/609/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/609/file/index.m3u8"
   },
   {
    "format_id": "247",
@@ -533,7 +533,7 @@
    "width": 1280,
    "height": 720,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=247&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=247&expire=1790277802"
   },
   {
    "format_id": "398",
@@ -548,7 +548,7 @@
    "width": 1280,
    "height": 720,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=398&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=398&expire=1790277802"
   },
   {
    "format_id": "270",
@@ -561,8 +561,8 @@
    "width": 1920,
    "height": 1080,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/270/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/270/file/index.m3u8"
   },
   {
    "format_id": "137",
@@ -577,7 +577,7 @@
    "width": 1920,
    "height": 1080,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=137&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=137&expire=1790277802"
   },
   {
    "format_id": "614",
@@ -590,8 +590,8 @@
    "width": 1920,
    "height": 1080,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=614&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=614&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/614/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/614/file/index.m3u8"
   },
   {
    "format_id": "248",
@@ -606,7 +606,7 @@
    "width": 1920,
    "height": 1080,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=248&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=248&expire=1790277802"
   },
   {
    "format_id": "399",
@@ -621,7 +621,7 @@
    "width": 1920,
    "height": 1080,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=399&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=399&expire=1790277802"
   },
   {
    "format_id": "620",
@@ -634,8 +634,8 @@
    "width": 2560,
    "height": 1440,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=620&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=620&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/620/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/620/file/index.m3u8"
   },
   {
    "format_id": "271",
@@ -650,7 +650,7 @@
    "width": 2560,
    "height": 1440,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=271&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=271&expire=1790277802"
   },
   {
    "format_id": "400",
@@ -665,7 +665,7 @@
    "width": 2560,
    "height": 1440,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=400&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=400&expire=1790277802"
   },
   {
    "format_id": "625",
@@ -678,8 +678,8 @@
    "width": 3840,
    "height": 2160,
    "fps": 25.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=625&expire=1790274250",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=625&expire=1790274250"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/625/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277802/itag/625/file/index.m3u8"
   },
   {
    "format_id": "313",
@@ -694,7 +694,7 @@
    "width": 3840,
    "height": 2160,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=313&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=313&expire=1790277802"
   },
   {
    "format_id": "401",
@@ -709,7 +709,7 @@
    "width": 3840,
    "height": 2160,
    "fps": 25,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=401&expire=1790274250"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=401&expire=1790277802"
   }
  ]
 }

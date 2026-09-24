@@ -141,7 +141,8 @@ _BASE_OPTS: dict[str, Any] = {
 
 # Flat listing: one page request, no per-entry player call. Used for search,
 # channel and playlist listings.
-_FLAT_OPTS: dict[str, Any] = {"extract_flat": "in_playlist"}
+# noplaylist=False overrides _BASE_OPTS: listings ARE playlists to yt-dlp.
+_FLAT_OPTS: dict[str, Any] = {"extract_flat": "in_playlist", "noplaylist": False}
 
 # Substrings of yt-dlp error messages. yt-dlp errors are strings, not a
 # class hierarchy, so this is the mapping. New wording from YouTube → add a
@@ -729,7 +730,7 @@ def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
     if sp:
         params["sp"] = sp
     url = "https://www.youtube.com/results?" + urllib.parse.urlencode(params)
-    info = _extract(url, {"extract_flat": "in_playlist", "playlistend": limit})
+    info = _extract(url, {**_FLAT_OPTS, "playlistend": limit})
     hits: list[SearchHit] = []
     for entry in info.get("entries") or []:
         try:

@@ -787,3 +787,30 @@ def test_ydl_logger_redacts_signed_urls_at_every_level(caplog: pytest.LogCapture
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert text.count("<googlevideo-url>") == 4
     assert "SECRET" not in text and "1.2.3.4" not in text
+
+
+# ---- review round 4 (PR #16) ------------------------------------------------
+
+
+@pytest.mark.parametrize("fetch", ["channel", "playlist"])
+def test_listing_extractions_allow_playlists(monkeypatch: pytest.MonkeyPatch, fetch: str) -> None:
+    """_BASE_OPTS sets noplaylist for single-video extraction; listings must
+    override it or yt-dlp may collapse them to one entry."""
+    _install(monkeypatch, {"id": "X", "title": "T", "entries": []})
+    getattr(youtube, f"_fetch_{fetch}")("PLabcdefghijk" if fetch == "playlist" else "UCabc")
+    assert FakeYDL.calls[0][0]["noplaylist"] is False
+
+
+def test_search_extraction_allows_playlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    youtube._search_hits("q", 5, None)
+    assert FakeYDL.calls[0][0]["noplaylist"] is False
+
+
+def test_captured_live_fixture_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = _captured("video_live.json", LIVE_INFO)
+    _install(monkeypatch, info)
+    d = youtube._fetch_video(str(info["id"]))
+    assert d.is_live is True
+    master = youtube._stream_url_cache[("live", str(info["id"]))][0]
+    assert master.startswith("https://manifest.googlevideo.com/") and master.endswith(".m3u8")
