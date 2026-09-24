@@ -70,7 +70,7 @@ _BLOCKED_MARKERS = (
     "sign in to confirm", "po token", "not a bot", "confirm your age", "age-restricted",
 )
 _UNAVAILABLE_MARKERS = (
-    "video unavailable", "private video", "has been removed", "is not available",
+    "video unavailable", "video is unavailable", "private video", "has been removed", "is not available",
     "account associated with this video has been terminated",
 )
 

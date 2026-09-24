@@ -185,6 +185,7 @@ def test_captured_fixtures_when_present(monkeypatch: pytest.MonkeyPatch) -> None
         ("ERROR: [youtube] x: Sign in to confirm your age", 503, "YOUTUBE_BLOCKED"),
         ("ERROR: [youtube] x: This video requires a PO Token", 503, "YOUTUBE_BLOCKED"),
         ("ERROR: [youtube] x: Video unavailable", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] aaaaaaaaaaa: This video is unavailable", 404, "VIDEO_UNAVAILABLE"),
         ("ERROR: [youtube] x: Private video", 404, "VIDEO_UNAVAILABLE"),
         ("ERROR: [youtube] x: This video has been removed by the uploader", 404, "VIDEO_UNAVAILABLE"),
         ("ERROR: [youtube] x: nsig extraction failed", 502, "UPSTREAM_FAILURE"),
