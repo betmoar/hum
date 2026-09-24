@@ -332,7 +332,7 @@ def test_yt_dlp_output_goes_to_logging_not_stderr(monkeypatch: pytest.MonkeyPatc
 def test_captured_search_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
     p = FIXTURES / "search_flat.json"
     if not p.exists():
-        pytest.skip("no captured search fixture yet (run bench --capture)")
+        pytest.skip("no captured search fixture (run scripts/capture_ytdlp_fixtures.py)")
     _install(monkeypatch, json.loads(p.read_text()))
     hits = youtube._search_hits("q", 20, None)
     videos = [h for h in hits if h.kind == "video"]
@@ -501,7 +501,7 @@ async def test_resolve_live_master_url_returns_url_on_first_call(
         lambda vid: youtube.LiveStreamInfo(
             video_id=vid, title="t", author="a", channel_id="c",
             thumbnail_url="x",
-            master_hls_url="https://manifest.googlevideo.com/abc?expire=999999999",
+            master_hls_url="https://manifest.googlevideo.com/abc?expire=4102444800",
         ),
     )
     url = await youtube.resolve_live_master_url("vid12345678")
@@ -516,7 +516,7 @@ async def test_resolve_live_master_url_caches_result(monkeypatch: pytest.MonkeyP
         return youtube.LiveStreamInfo(
             video_id=vid, title="t", author="a", channel_id="c",
             thumbnail_url="x",
-            master_hls_url="https://manifest.googlevideo.com/abc?expire=999999999",
+            master_hls_url="https://manifest.googlevideo.com/abc?expire=4102444800",
         )
 
     monkeypatch.setattr(youtube, "_fetch_live_manifest", fake_fetch)
@@ -732,3 +732,45 @@ def test_filtered_search_returns_only_videos(monkeypatch: pytest.MonkeyPatch) ->
     _install(monkeypatch, {"entries": entries})
     assert [h.kind for h in youtube._search_hits("q", 10, "Eg0QAZoBCC9tLzA0cmxm")] == ["video"]
     assert {h.kind for h in youtube._search_hits("q", 10, None)} == {"video", "channel", "playlist"}
+
+
+# ---- review round 2 (PR #16) ------------------------------------------------
+
+
+def test_url_expire_epoch_reads_path_style_expire() -> None:
+    """Live HLS manifests carry expire as a path segment (/expire/<epoch>/),
+    not a query param (captured from yt-dlp 2026-09-24)."""
+    now = 1_790_000_000.0
+    u = "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790001234/ei/x/id/y"
+    assert youtube._url_expire_epoch(u, now=now) == 1_790_001_234.0
+
+
+def test_expired_live_master_url_is_not_cached() -> None:
+    """A past `expire` means the URL is dead; caching it would keep /api/live
+    broken until the 5-minute TTL runs out."""
+    past = int(time.time()) - 60
+    youtube._cache_live_master("vidLIVE0001", f"https://manifest.googlevideo.com/m?expire={past}")
+    assert youtube._stream_url_cache.get(("live", "vidLIVE0001")) is None
+
+
+def test_live_master_ttl_clamped_to_upstream_expire() -> None:
+    soon = int(time.time()) + 60
+    youtube._cache_live_master("vidLIVE0002", f"https://manifest.googlevideo.com/m/expire/{soon}/x")
+    _, expiry = youtube._stream_url_cache[("live", "vidLIVE0002")]
+    assert expiry <= soon
+
+
+def test_yt_dlp_failure_log_redacts_signed_urls(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from yt_dlp.utils import DownloadError
+
+    msg = "ERROR: unable to download https://rr1---sn.googlevideo.com/videoplayback?ip=1.2.3.4&sig=SECRET"
+    _install(monkeypatch, DownloadError(msg))
+    with caplog.at_level(logging.DEBUG, logger="hum.youtube"), pytest.raises(YouTubeError):
+        youtube._fetch_video("x")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "unable to download" in text  # diagnostic kept
+    assert "SECRET" not in text and "1.2.3.4" not in text

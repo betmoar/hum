@@ -156,6 +156,13 @@ def _make_ydl(opts: dict[str, Any]) -> Any:
     return yt_dlp.YoutubeDL(opts)
 
 
+_CDN_URL_RE = re.compile(r"https?://[^\s'\"]*googlevideo\.com[^\s'\"]*")
+
+
+def _redact_cdn_urls(text: str) -> str:
+    return _CDN_URL_RE.sub("<googlevideo-url>", text)
+
+
 def _map_error(e: BaseException) -> YouTubeError:
     """Translate a yt-dlp failure into a YouTubeError with a sane HTTP status.
 
@@ -168,7 +175,8 @@ def _map_error(e: BaseException) -> YouTubeError:
     # signed googlevideo URLs (invariant 3). Raw text stays in the server log.
     msg = str(e)
     low = msg.lower()
-    logger.info("yt-dlp failure (%s): %s", type(e).__name__, msg)
+    # Signed googlevideo URLs are redacted even from the server log.
+    logger.info("yt-dlp failure (%s): %s", type(e).__name__, _redact_cdn_urls(msg))
     if any(m in low for m in _BLOCKED_MARKERS):
         return YouTubeError(503, "YOUTUBE_BLOCKED", "YouTube is blocking requests")
     if any(m in low for m in _UNAVAILABLE_MARKERS):
@@ -399,13 +407,12 @@ def _cache_live_master(video_id: str, master_url: str) -> None:
     """Cache a live master URL under ("live", video_id) with TTL
     min(5 min, upstream `expire`). Single dict write (GIL-atomic)."""
     now = time.time()
-    upstream_expire = _url_expire_epoch(master_url)
-    # Clamp by upstream `expire` only when it lies in the future; an already-past
-    # value is treated as no constraint (the URL is either ageless or the param
-    # is sentinel/garbage). 5-minute ceiling still applies.
-    soft_ceiling = now + 300.0
-    expiry = min(soft_ceiling, upstream_expire) if upstream_expire > now else soft_ceiling
-    _stream_url_cache[("live", video_id)] = (master_url, expiry)
+    # _url_expire_epoch already returns a future fallback when `expire` is
+    # missing or garbage, so a past value means the URL is dead: don't cache
+    # it (/api/live would keep serving it until the TTL ran out).
+    expiry = min(now + 300.0, _url_expire_epoch(master_url, now=now))
+    if expiry > now:
+        _stream_url_cache[("live", video_id)] = (master_url, expiry)
 
 
 async def _refresh_cache_once(video_id: str) -> None:
@@ -739,6 +746,9 @@ def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
 # ---- Helpers -------------------------------------------------------------
 
 
+_PATH_EXPIRE_RE = re.compile(r"/expire/(\d+)(?:/|$)")
+
+
 def _url_expire_epoch(url: str, *, now: float | None = None) -> float:
     """Return the URL's `expire=` epoch, or a far-future fallback if absent.
 
@@ -746,9 +756,12 @@ def _url_expire_epoch(url: str, *, now: float | None = None) -> float:
     caller's `min(expire, now + cache_max_ttl)` clamps to our cache TTL —
     equivalent to "no explicit upstream constraint."
     """
-    qs = urllib.parse.urlparse(url).query
-    params = urllib.parse.parse_qs(qs)
-    val = params.get("expire", [None])[0]
+    parsed = urllib.parse.urlparse(url)
+    val = urllib.parse.parse_qs(parsed.query).get("expire", [None])[0]
+    if val is None:
+        # Live HLS manifest URLs carry it as a path segment: /expire/<epoch>/.
+        m = _PATH_EXPIRE_RE.search(parsed.path)
+        val = m.group(1) if m else None
     _now = now if now is not None else time.time()
     try:
         return float(val) if val else _now + _CACHE_MAX_TTL
