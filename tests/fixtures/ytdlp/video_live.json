@@ -15,8 +15,8 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/233/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/233/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/233/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/233/file/index.m3u8"
   },
   {
    "format_id": "234",
@@ -25,8 +25,8 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/234/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/234/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/234/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/234/file/index.m3u8"
   },
   {
    "format_id": "269",
@@ -39,8 +39,8 @@
    "width": 256,
    "height": 144,
    "fps": 15.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/269/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/269/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/269/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/269/file/index.m3u8"
   },
   {
    "format_id": "229",
@@ -53,8 +53,8 @@
    "width": 426,
    "height": 240,
    "fps": 30.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/229/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/229/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/229/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/229/file/index.m3u8"
   },
   {
    "format_id": "230",
@@ -67,8 +67,8 @@
    "width": 640,
    "height": 360,
    "fps": 30.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/230/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/230/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/230/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/230/file/index.m3u8"
   },
   {
    "format_id": "231",
@@ -81,8 +81,8 @@
    "width": 854,
    "height": 480,
    "fps": 30.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/231/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/231/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/231/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/231/file/index.m3u8"
   },
   {
    "format_id": "232",
@@ -95,8 +95,8 @@
    "width": 1280,
    "height": 720,
    "fps": 30.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/232/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/232/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/232/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/232/file/index.m3u8"
   },
   {
    "format_id": "270",
@@ -109,8 +109,8 @@
    "width": 1920,
    "height": 1080,
    "fps": 30.0,
-   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/270/file/index.m3u8",
-   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/1790277806/itag/270/file/index.m3u8"
+   "url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/270/file/index.m3u8",
+   "manifest_url": "https://manifest.googlevideo.com/api/manifest/hls_variant/expire/4102444800/itag/270/file/index.m3u8"
   }
  ]
 }

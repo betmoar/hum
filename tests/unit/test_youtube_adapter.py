@@ -304,7 +304,8 @@ def test_search_limit_and_url(monkeypatch: pytest.MonkeyPatch) -> None:
     hits = youtube._search_hits("daft punk", 2, "Eg0IAZoBCC9tLzA0cmxm")
     assert len(hits) == 2
     opts, url = FakeYDL.calls[0]
-    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 2
+    # Filtered (sp set): over-fetched, see test_filtered_search_overfetches_to_keep_limit.
+    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 2 + youtube._FILTERED_SEARCH_SLACK
     qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     assert qs["search_query"] == ["daft punk"]
     assert qs["sp"] == ["Eg0IAZoBCC9tLzA0cmxm"]
@@ -814,3 +815,37 @@ def test_captured_live_fixture_when_present(monkeypatch: pytest.MonkeyPatch) -> 
     assert d.is_live is True
     master = youtube._stream_url_cache[("live", str(info["id"]))][0]
     assert master.startswith("https://manifest.googlevideo.com/") and master.endswith(".m3u8")
+
+
+# ---- review round 6 (PR #16) ------------------------------------------------
+
+
+def test_filtered_search_overfetches_to_keep_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-video entries are dropped after extraction, so a filtered search
+    must ask yt-dlp for more than `limit` or return short."""
+    chan = {"_type": "url", "ie_key": "YoutubeTab", "id": "UCchannel0000000000000",
+            "url": "https://www.youtube.com/channel/UCchannel0000000000000", "title": "Chan"}
+    vids = [{**SEARCH_INFO["entries"][0], "id": f"vid0000000{i}"} for i in range(3)]
+    _install(monkeypatch, {"entries": [chan, *vids]})
+    hits = youtube._search_hits("q", 3, "Eg0QAZoBCC9tLzA0cmxm")
+    assert [h.kind for h in hits] == ["video"] * 3
+    assert FakeYDL.calls[0][0]["playlistend"] > 3
+
+
+def test_captured_fixture_urls_do_not_expire() -> None:
+    """Captured fixtures must not carry real expiry times: the adapter drops
+    expired live masters, so a real `expire` turns fixture tests red hours later."""
+    for name in ("video_vod.json", "video_live.json"):
+        p = FIXTURES / name
+        if not p.exists():
+            continue
+        for f in json.loads(p.read_text())["formats"]:
+            for key in ("url", "manifest_url"):
+                if isinstance(f.get(key), str) and "googlevideo.com" in f[key]:
+                    assert youtube._url_expire_epoch(f[key]) > time.time() + 10 * 365 * 86400, f[key]
+
+
+def test_unfiltered_search_fetches_exactly_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    youtube._search_hits("q", 7, None)
+    assert FakeYDL.calls[0][0]["playlistend"] == 7

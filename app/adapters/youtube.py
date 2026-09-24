@@ -725,6 +725,9 @@ def _hit(entry: Any) -> SearchHit | None:
     return None
 
 
+_FILTERED_SEARCH_SLACK = 10
+
+
 def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
     """Thread-bound. One flat results-page extraction: title, channel and
     duration come from the search response itself (no per-hit player call)."""
@@ -732,7 +735,10 @@ def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
     if sp:
         params["sp"] = sp
     url = "https://www.youtube.com/results?" + urllib.parse.urlencode(params)
-    info = _extract(url, {**_FLAT_OPTS, "playlistend": limit})
+    # Filtered searches drop non-video entries below; over-fetch so that
+    # doesn't eat into `limit` (a results page is one request either way).
+    fetch = limit if sp is None else limit + _FILTERED_SEARCH_SLACK
+    info = _extract(url, {**_FLAT_OPTS, "playlistend": fetch})
     hits: list[SearchHit] = []
     for entry in info.get("entries") or []:
         try:

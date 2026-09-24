@@ -41,9 +41,13 @@ _ENTRY_KEYS = (
 )
 
 
+# Fixed far-future expiry: a real one would make fixture-based tests fail
+# hours after capture (the adapter drops expired live master URLs).
+_FIXTURE_EXPIRE = "4102444800"  # 2100-01-01
+
+
 def _scrub_url(url: str, format_id: str) -> str:
-    m = re.search(r"[?&/]expire[=/](\d+)", url)
-    expire = m.group(1) if m else "0"
+    expire = _FIXTURE_EXPIRE
     if urllib.parse.urlparse(url).hostname == "manifest.googlevideo.com":
         # Live HLS master: keep the manifest shape the adapter relies on
         # (host, path-style /expire/, .m3u8), drop ip/sig/ids.

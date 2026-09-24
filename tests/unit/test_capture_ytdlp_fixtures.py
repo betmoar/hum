@@ -22,7 +22,7 @@ def test_scrub_keeps_live_master_as_hls_manifest() -> None:
     }]}
     f = cap.scrub_video_info(info)["formats"][0]
     assert f["manifest_url"].startswith("https://manifest.googlevideo.com/api/manifest/hls_variant/")
-    assert f["manifest_url"].endswith(".m3u8") and "/expire/1790273790/" in f["manifest_url"]
+    assert f["manifest_url"].endswith(".m3u8") and "/expire/4102444800/" in f["manifest_url"]
     assert "203.0.113.9" not in str(f) and "SECRET" not in str(f)
 
 
@@ -32,4 +32,4 @@ def test_scrub_replaces_signed_videoplayback_urls() -> None:
         "url": "https://rr3---sn-x.googlevideo.com/videoplayback?expire=1790000000&ip=203.0.113.9&sig=S&itag=140",
     }]}
     url = cap.scrub_video_info(info)["formats"][0]["url"]
-    assert url == "https://rr1---sn.googlevideo.com/videoplayback?itag=140&expire=1790000000"
+    assert url == "https://rr1---sn.googlevideo.com/videoplayback?itag=140&expire=4102444800"
