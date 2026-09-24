@@ -189,7 +189,9 @@
   let startArmedFor: string | null = null;
   $effect(() => {
     const id = currentVideoId;
-    if (!id) return;
+    // Nothing playing ends the session: the same video picked again later
+    // must re-arm its start seek (bookmark).
+    if (!id) { startArmedFor = null; return; }
     const t = store.player.current;
     if (t && 'mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({

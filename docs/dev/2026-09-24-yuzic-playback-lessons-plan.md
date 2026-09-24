@@ -3,11 +3,13 @@
 > Execute with dev-flow: one task at a time, review after each task.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** implement spec R1–R7 (resume, history/previous, content-kind table,
-unreachable detection, media-session position, constants doc, loudness).
-**Architecture:** pure helpers (`contentKind.ts`, `bookmarks.ts`,
-`loudness.ts`) + store changes (history, persisted current, strip helper) +
-Player wiring. Backend change is one optional model field read in the adapter.
+**Goal:** implement spec R1–R6 (resume, history/previous, content-kind table,
+unreachable detection, media-session position, constants doc). R7 (loudness)
+was dropped: yt-dlp (0.2.0) exposes no `loudnessDb`; its task below is kept
+as a record only.
+**Architecture:** pure helpers (`contentKind.ts`, `bookmarks.ts`) + store
+changes (history, persisted current, strip helper) + Player wiring. No backend
+change (the only one planned was R7's `loudness_db` field).
 **Tech stack:** Svelte 5 runes, vitest + @testing-library/svelte (jsdom),
 FastAPI/Pydantic, pytest.
 **Spec:** `docs/dev/2026-09-24-yuzic-playback-lessons-spec.md`
@@ -43,9 +45,9 @@ clean, vitest **187 passed (21 files)**, vite build ok. No failing tests.
 | `frontend/src/lib/store.svelte.ts` | strip helper, persisted current/history, `previous()`, `startPositionFor()`, `notifyUnreachable()`, normalize setting | 4, 6 |
 | `frontend/src/components/Player.svelte` | start seek, position saves, autoplay gating, prev, mediaSession, unreachable path, volume gain | 5, 6 |
 | `frontend/src/components/NowPlaying.svelte` | prev button, kind accessors | 5 |
-| `frontend/src/lib/loudness.ts` (new) | dB → gain | 6 |
+| `frontend/src/lib/loudness.ts` (new) | dB → gain | 6 (dropped) |
 | `frontend/src/pages/Settings.svelte` | normalize toggle | 6 |
-| `app/models.py`, `app/adapters/youtube.py`, `frontend/src/lib/types.ts` | `loudness_db` | 6 |
+| `app/models.py`, `app/adapters/youtube.py`, `frontend/src/lib/types.ts` | `loudness_db` | 6 (dropped) |
 | `docs/ARCHITECTURE.md`, `CLAUDE.md` | constants table, coupling updates | 7 |
 
 ---

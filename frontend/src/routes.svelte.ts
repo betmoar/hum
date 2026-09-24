@@ -51,7 +51,9 @@ class Router {
     if (this.path !== '/settings') return;
     this.settingsOpen = true;
     this.path = '/';
-    window.location.hash = '/';
+    // replaceState, not location.hash: no history entry, so Back after
+    // closing the dialog leaves the page instead of re-opening Settings.
+    history.replaceState(history.state, '', '#/');
   }
 
   navigate(p: string): void {

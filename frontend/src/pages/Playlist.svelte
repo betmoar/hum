@@ -40,7 +40,9 @@
     if (!playlist || !playlist.truncated || loadingMore) return;
     loadingMore = true;
     try {
-      const start = playlist.items.length + 1;
+      // The backend's cursor, not items.length + 1: unavailable entries are
+      // filtered out of items, so the count would overlap the last window.
+      const start = playlist.next_start ?? playlist.items.length + 1;
       const next = await api.playlist(id, { start });
       playlist = {
         ...next,

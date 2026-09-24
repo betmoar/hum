@@ -213,6 +213,17 @@ describe('Playlist page — truncation + Load more (#19)', () => {
     expect(queryByText(/load more/i)).toBeNull();
   });
 
+  it('Load more uses the backend next_start cursor, not items.length', async () => {
+    // Two unavailable entries were filtered out of the first 4-position window:
+    // items.length + 1 would be 3 and re-fetch positions 3-4.
+    const playlistSpy = vi.spyOn(api, 'playlist').mockResolvedValueOnce({ ...truncatedPlaylist, next_start: 5 });
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Track B');
+    playlistSpy.mockResolvedValueOnce({ ...truncatedPlaylist, truncated: false, next_start: null, items: [] });
+    await fireEvent.click(getByText(/load more/i));
+    await waitFor(() => expect(playlistSpy).toHaveBeenLastCalledWith('PLbig', { start: 5 }));
+  });
+
   it('enqueueAll on a truncated playlist notifies with the "load more to add the rest" suffix', async () => {
     vi.spyOn(api, 'playlist').mockResolvedValue(truncatedPlaylist);
     const storeMod = await import('../../src/lib/store.svelte');

@@ -84,6 +84,8 @@ export type PlaylistInfo = {
   // True when `items` is a prefix of the full playlist (capped by the backend's
   // playlistend limit, or a `?start=` window that doesn't reach the end).
   truncated?: boolean;
+  // 1-based start of the next window (raw playlist positions); null at the end.
+  next_start?: number | null;
 };
 
 // Frontend-only type used by the player + queue.

@@ -43,6 +43,16 @@ describe('router matchPath', () => {
     router.closeSettings();
   });
 
+  it('the deep-link redirect replaces the history entry instead of pushing one', () => {
+    router.closeSettings();
+    const len = history.length;
+    go('/settings');
+    expect(window.location.hash).toBe('#/');
+    // go() itself pushes #/settings; the redirect must not add a second entry.
+    expect(history.length).toBe(len + 1);
+    router.closeSettings();
+  });
+
   it('captures the /video/:id param', () => {
     go('/video/dQw4w9WgXcQ');
     expect(router.match.component).toBe(Video);

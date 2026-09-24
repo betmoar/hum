@@ -96,3 +96,7 @@ class PlaylistInfo(BaseModel):
     # for very large or partially-restricted playlists, or the fetch window can
     # start beyond 0). Explicit signal so the frontend never has to infer it.
     truncated: bool = False
+    # 1-based `start` for the next window, or None at the end. Counts raw
+    # playlist positions, so it stays right when unavailable entries were
+    # filtered out of `items` (len(items) would under-count and overlap).
+    next_start: int | None = None

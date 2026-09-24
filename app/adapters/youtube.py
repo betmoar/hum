@@ -816,6 +816,7 @@ def _fetch_playlist(
         video_count=video_count if video_count is not None else fetched_through,
         items=items,
         truncated=truncated,
+        next_start=fetched_through + 1 if truncated else None,
     )
 
 

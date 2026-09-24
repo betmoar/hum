@@ -624,6 +624,33 @@ async def test_playlist_not_truncated_when_window_covers_playlist(
     assert result.truncated is False
 
 
+async def test_playlist_next_start_counts_raw_positions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """next_start advances past filtered (private/deleted) rows, so the next
+    window never overlaps the one just returned."""
+    info = {
+        "title": "Gappy", "uploader": "C", "playlist_count": 10,
+        "entries": [
+            {"id": "v1", "title": "One"},
+            {"id": "v2", "title": "[Private video]"},
+            {"id": "v3", "title": "[Deleted video]"},
+            {"id": "v4", "title": "Four"},
+        ],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert [i.video_id for i in result.items] == ["v1", "v4"]
+    assert result.truncated is True
+    assert result.next_start == 5
+
+
+async def test_playlist_next_start_none_at_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, PLAYLIST_INFO)
+    result = await youtube.playlist("PLxyz", start=1, limit=200)
+    assert result.next_start is None
+
+
 async def test_playlist_truncation_fallback_without_playlist_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

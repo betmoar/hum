@@ -410,6 +410,19 @@ describe('Player — resume, previous, media session, unreachable', () => {
     expect(audio.currentTime).toBe(123);
   });
 
+  it('replaying the same video after the player was cleared re-arms the start seek', async () => {
+    const spy = vi.spyOn(store, 'startPositionFor').mockReturnValue(0);
+    store.playNow(sampleTrack('rr', '/proxy/audio/rr?x'));
+    render(Player);
+    await tick();
+    expect(spy).toHaveBeenCalledTimes(1);
+    store.player.current = null;
+    await tick();
+    store.playNow(sampleTrack('rr', '/proxy/audio/rr?x'));
+    await tick();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
   it('a same-video object swap (quality switch) does not re-arm the start seek', async () => {
     const spy = vi.spyOn(store, 'startPositionFor').mockReturnValue(0);
     store.playNow(sampleTrack('w', '/proxy/audio/w?itag=140'));
