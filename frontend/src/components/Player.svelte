@@ -2,6 +2,8 @@
   import { store, playerControls } from '../lib/store.svelte';
   import { formatDuration } from '../lib/format';
   import { api } from '../lib/api';
+  import { pickForTier } from '../lib/pickAudio';
+  import { detectAudioEnv } from '../lib/browserEnv';
   import type { Track } from '../lib/types';
   import Icon from './Icon.svelte';
   import Marquee from './Marquee.svelte';
@@ -297,12 +299,20 @@
     if (!t || t.isLive || pickVodSrc(t)) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
-      const same = fresh.audio_formats.find((f) => f.itag === t.itag) ?? fresh.audio_formats[0];
+      // Stub tracks (queued from a playlist listing) have no itag yet: pick by
+      // the user's quality tier, not formats[0] (yt-dlp lists lowest first).
+      const same =
+        fresh.audio_formats.find((f) => f.itag === t.itag) ??
+        pickForTier(fresh.audio_formats, t.qualityTier ?? store.settings.defaultQuality, detectAudioEnv()) ??
+        fresh.audio_formats[0];
       if (same) {
         store.player.current = {
           ...t,
           audioUrl: same.url,
           hlsUrl: same.hls_url ?? undefined,
+          itag: same.itag,
+          bitrate: same.bitrate,
+          _formats: fresh.audio_formats,
         };
       }
     }).catch(() => {

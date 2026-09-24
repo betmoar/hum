@@ -10,8 +10,11 @@
 
   let imgFailed = $state(false);
 
+  const browsable = $derived(hit.kind === 'video' || hit.kind === 'playlist');
+
   function open() {
     if (hit.kind === 'video') router.navigate(`/video/${hit.id}`);
+    else if (hit.kind === 'playlist') router.navigate(`/playlist/${hit.id}`);
   }
   function playNow(e: MouseEvent) {
     e.stopPropagation();
@@ -27,9 +30,9 @@
   class="item"
   role="button"
   tabindex="0"
-  aria-disabled={hit.kind !== 'video' ? 'true' : 'false'}
+  aria-disabled={browsable ? 'false' : 'true'}
   onclick={open}
-  onkeydown={(e) => { if (hit.kind === 'video' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } }}
+  onkeydown={(e) => { if (browsable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } }}
 >
   <div class="thumb">
     {#if hit.thumbnail_url && !imgFailed}
@@ -46,7 +49,13 @@
   <div class="meta">
     <div class="title">{hit.title}</div>
     {#if hit.author}<div class="author">{hit.author}</div>{/if}
-    <div class="kind">{hit.kind}</div>
+    <div class="kind">
+      {#if hit.kind === 'playlist' && hit.video_count != null}
+        playlist &middot; {hit.video_count} video{hit.video_count === 1 ? '' : 's'}
+      {:else}
+        {hit.kind}
+      {/if}
+    </div>
   </div>
   {#if hit.kind === 'video'}
     <div class="actions">

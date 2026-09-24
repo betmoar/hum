@@ -21,10 +21,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Channel `subscriber_count` is now populated (yt-dlp `channel_follower_count`).
   Loudness normalisation data (`loudnessDb`) is not available under yt-dlp.
 
+### Added
+
+- **Browse playlists from search**: playlist hits open a playlist page
+  (`#/playlist/<id>`) with play-now / enqueue per track plus "Play all" and
+  "Enqueue all". Bulk enqueue uses the playlist listing's metadata — no
+  per-track `/api/video` call; the signed URL is fetched when a track starts.
+
 ### Fixed
 
 - yt-dlp: "This video is unavailable" now maps to 404 `VIDEO_UNAVAILABLE` instead of
   502 `UPSTREAM_FAILURE`.
+- Search filters (`category=music`, `live=true`) sent sort-order instead of
+  type=Video (protobuf field 1 vs 2), so filtered searches could return nothing
+  ("verknipt" + music: 0 results). Filtered searches now return videos only.
+- Search no longer lists YouTube "Mix" playlists (`RD…` ids): YouTube refuses to
+  open them as playlists.
+- Error responses no longer echo yt-dlp's raw error text, which can contain
+  signed CDN URLs; the raw text goes to the server log.
+- A live video without an HLS manifest now fails at `/api/video` with 502
+  `LIVE_UNAVAILABLE` instead of returning an unplayable live track.
+- `httpx` request logging is capped at WARNING: at INFO it logged every signed
+  googlevideo URL, including the server's IP.
 
 ### Removed
 
