@@ -9,6 +9,7 @@
   import Marquee from './Marquee.svelte';
   import LivePill from './LivePill.svelte';
   import { createAirplayControl } from '../lib/airplay.svelte';
+  import { usesHls, isSeekable, isAirplayRoutable } from '../lib/contentKind';
 
   const airplay = createAirplayControl();
   let airplaySupported = $state(false);
@@ -21,7 +22,7 @@
     document.createElement('audio').canPlayType('application/vnd.apple.mpegurl') !== '';
 
   function pickVodSrc(t: Track | null): string | undefined {
-    if (!t || t.isLive) return undefined;
+    if (!t || usesHls(t)) return undefined;
     if (hlsNative && t.hlsUrl) return t.hlsUrl;
     return t.audioUrl || undefined;
   }
@@ -161,7 +162,7 @@
   // flag on it would never re-render NowPlaying when the availability event
   // arrives post-mount.
   let airplayCapable = $derived(
-    airplaySupported && airplay.state.available && !store.player.current?.isLive
+    airplaySupported && airplay.state.available && isAirplayRoutable(store.player.current)
   );
   $effect(() => {
     store.player.airplayCapable = airplayCapable;
@@ -198,7 +199,7 @@
   // On iOS Safari (no MSE) we fall back to native HLS via the src attribute.
   $effect(() => {
     const t = store.player.current;
-    if (!el || !t?.isLive || !t.liveStreamUrl) return;
+    if (!el || !usesHls(t) || !t?.liveStreamUrl) return;
 
     let cancelled = false;
     let hls: import('hls.js').default | null = null;
@@ -311,7 +312,7 @@
   // when liveStreamUrl is missing.
   $effect(() => {
     const t = store.player.current;
-    if (!t || t.isLive || pickVodSrc(t)) return;
+    if (!t || usesHls(t) || pickVodSrc(t)) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
       // A stub queued from a playlist listing can turn out to be live: switch
@@ -356,7 +357,7 @@
   // (stripped on flush), refetch via api.video for a fresh signed URL.
   $effect(() => {
     const t = store.player.current;
-    if (!t?.isLive || t.liveStreamUrl) return;
+    if (!t || !usesHls(t) || t.liveStreamUrl) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
       if (fresh.is_live && fresh.live_stream_url) {
@@ -396,7 +397,7 @@
     // Live tracks: hls.js owns recovery (network restart, media recover,
     // fatal-error toast). Audio-element errors during hls.js playback are
     // already routed through hls.js's own error events.
-    if (t.isLive) return;
+    if (usesHls(t)) return;
     // If the playable URL is empty, the dedicated rehydrate $effect owns
     // refetching. Don't double-fetch and don't consume the retry slot.
     if (!pickVodSrc(t)) return;
@@ -527,7 +528,7 @@
         >
           <Icon name="shuffle" size={18} />
         </button>
-        {#if !store.player.current.isLive}
+        {#if isSeekable(store.player.current)}
           <button class="ctrl" onclick={restart} aria-label="Restart track">
             <Icon name="skip-back" size={20} />
           </button>

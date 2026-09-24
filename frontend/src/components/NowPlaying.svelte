@@ -4,6 +4,7 @@
   import { router } from '../routes.svelte';
   import Icon from './Icon.svelte';
   import LivePill from './LivePill.svelte';
+  import { usesHls, isSeekable } from '../lib/contentKind';
 
   let livePos = $state(0);
   let liveDur = $state(0);
@@ -43,7 +44,7 @@
   }
 
   function onScrub(e: Event) {
-    // Scrubber is gated by !t.isLive in the template, so only audio.
+    // Scrubber is gated by isSeekable(t) in the template, so only audio.
     const audio = document.querySelector('audio') as HTMLAudioElement | null;
     if (audio) {
       audio.currentTime = Number((e.target as HTMLInputElement).value);
@@ -55,7 +56,7 @@
   }
 
   function restartTrack() {
-    // Restart button is gated by !t.isLive in the template, so only audio.
+    // Restart button is gated by isSeekable(t) in the template, so only audio.
     const audio = document.querySelector('audio') as HTMLAudioElement | null;
     if (audio) audio.currentTime = 0;
   }
@@ -162,7 +163,7 @@
             {/if}
           {/if}
         </div>
-        {#if !t.isLive}
+        {#if !usesHls(t)}
           <div class="quality-row">
             <span class="quality-label">Quality</span>
             <div class="seg" role="radiogroup" aria-label="Quality">
@@ -187,7 +188,7 @@
     <!-- Controls zone — sticky bottom, always reachable. Scrubber lives
          here paired with transport (Apple Music / Spotify pattern). -->
     <div class="overlay-controls">
-      {#if !t.isLive}
+      {#if isSeekable(t)}
         <div class="scrubber" style="--progress: {liveDur ? (livePos / liveDur) * 100 : 0}%">
           <input
             type="range"
@@ -217,7 +218,7 @@
         <Icon name="shuffle" size={24} />
       </button>
 
-      {#if !t.isLive}
+      {#if isSeekable(t)}
         <button class="ctrl ctrl-prev" onclick={restartTrack} aria-label="Restart track">
           <Icon name="skip-back" size={30} />
         </button>
