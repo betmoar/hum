@@ -2,6 +2,8 @@
   import { store, playerControls } from '../lib/store.svelte';
   import { formatDuration } from '../lib/format';
   import { api } from '../lib/api';
+  import { pickForTier } from '../lib/pickAudio';
+  import { detectAudioEnv } from '../lib/browserEnv';
   import type { Track } from '../lib/types';
   import Icon from './Icon.svelte';
   import Marquee from './Marquee.svelte';
@@ -288,6 +290,21 @@
     };
   });
 
+  // Rehydrate failure/no-format path: a queue built from a playlist can
+  // contain a private/deleted video. Rather than halt playback dead, skip to
+  // the next queued track when one exists; otherwise fall back to the
+  // original "stuck" notice. Guards against the current track having already
+  // changed by the time this fires (e.g. the user skipped manually).
+  function skipUnplayableRehydrate(t: Track) {
+    if (store.player.current?.videoId !== t.videoId) return;
+    if (store.queue.length > 0) {
+      store.notify('Skipped a track that could not be loaded.', 'error');
+      store.next();
+    } else {
+      store.notify('Could not load this track.', 'error');
+    }
+  }
+
   // When a VOD track is rehydrated from localStorage its URLs are cleared.
   // Refetch on demand so playback can begin without a manual retry. Live
   // tracks handle their own refetch in the live-mount effect by re-running
@@ -297,16 +314,41 @@
     if (!t || t.isLive || pickVodSrc(t)) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
-      const same = fresh.audio_formats.find((f) => f.itag === t.itag) ?? fresh.audio_formats[0];
+      // A stub queued from a playlist listing can turn out to be live: switch
+      // it to a live track so the hls.js live-mount effect takes over.
+      if (fresh.is_live) {
+        if (fresh.live_stream_url) {
+          store.player.current = { ...t, isLive: true, liveStreamUrl: fresh.live_stream_url, durationSeconds: 0 };
+        }
+        return;
+      }
+      // Stub tracks (queued from a playlist listing) have no itag yet: pick by
+      // the user's quality tier, not formats[0] (yt-dlp lists lowest first).
+      const byItag = fresh.audio_formats.find((f) => f.itag === t.itag);
+      let same = byItag;
+      // Track the tier actually used so it can be written back onto the
+      // track below — byItag means we matched the exact prior format, so the
+      // existing qualityTier (if any) stays authoritative.
+      let tierUsed: typeof t.qualityTier;
+      if (!same) {
+        tierUsed = t.qualityTier ?? store.settings.defaultQuality;
+        same = pickForTier(fresh.audio_formats, tierUsed, detectAudioEnv()) ?? fresh.audio_formats[0];
+      }
       if (same) {
         store.player.current = {
           ...t,
           audioUrl: same.url,
           hlsUrl: same.hls_url ?? undefined,
+          itag: same.itag,
+          bitrate: same.bitrate,
+          _formats: fresh.audio_formats,
+          ...(tierUsed !== undefined ? { qualityTier: tierUsed } : {}),
         };
+      } else {
+        skipUnplayableRehydrate(t);
       }
     }).catch(() => {
-      store.notify('Could not load this track.', 'error');
+      skipUnplayableRehydrate(t);
     });
   });
 

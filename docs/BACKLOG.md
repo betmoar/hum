@@ -12,7 +12,7 @@ risks below and P3 notes.
 |---|---|
 | Bearer token lives in browser localStorage; any XSS = full compromise. | Single-user LAN app; no third-party scripts. CSP is now shipped (`app/static.py`), reducing blast radius for script-injection XSS, but `style-src 'unsafe-inline'` remains (required by Svelte 5's compiled `element.style.cssText` writes) so style-based exfiltration vectors aren't fully closed. |
 | YouTube can invalidate cached CDN URLs early (IP change) → mid-play 403 until the frontend's refetch recovery kicks in. | Mitigated: `/proxy/audio` now evicts the stale `(video_id, itag)` cache entry and retries the resolve once on 403/410 before streaming the error through (`app/proxy/_common.py`). Only a persistent 403 still falls to the frontend recovery dance. |
-| `pytubefix` is reverse-engineered; total breakage is a *when*, not *if*. | Contained by invariant 1 + playbook 1. |
+| `yt-dlp`'s YouTube extractor is reverse-engineered; total breakage is a *when*, not *if*. | Contained by invariant 1 + playbook 1. |
 | No rate limiting anywhere. | Single trusted user; bearer gate. Do not expose to the internet. |
 | Live master-manifest fetches have no single-flight (concurrent pollers may double-fetch during the 2 s cache window). | One listener in practice; harmless duplicate GET. |
 
@@ -26,5 +26,6 @@ _(None open — cleared in the 2026-07 backlog sweep.)_
 
 ## P3
 
-- **`aiohttp` is a transitive dep of pytubefix only.** Dependabot bumps it (see git
-  log); nothing imports it directly. No action — just don't be confused by it.
+_(None open — the `aiohttp` / `nodejs-wheel-binaries` transitive-dep note was removed:
+both came in via `pytubefix`, which is gone. yt-dlp's runtime dependency is the deno
+binary, shipped in the Docker image and required on PATH for local dev.)_

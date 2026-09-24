@@ -1,6 +1,7 @@
 import type { Component } from 'svelte';
 import Search from './pages/Search.svelte';
 import Video from './pages/Video.svelte';
+import Playlist from './pages/Playlist.svelte';
 import Queue from './pages/Queue.svelte';
 import Radio from './pages/Radio.svelte';
 import Settings from './pages/Settings.svelte';
@@ -21,6 +22,8 @@ function matchPath(path: string): Match {
   if (path === '/settings') return { component: Settings, params: {} };
   const m = path.match(/^\/video\/(.+)$/);
   if (m) return { component: Video, params: { id: m[1] } };
+  const p = path.match(/^\/playlist\/(.+)$/);
+  if (p) return { component: Playlist, params: { id: p[1] } };
   return { component: Search, params: {} };
 }
 

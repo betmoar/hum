@@ -32,10 +32,10 @@ _SPA_RESERVED_PREFIXES = ("api/", "proxy/", "health", "docs", "redoc", "openapi.
 # and update _CSP below. A stale hash fails silently (CSP violations don't
 # throw — the bootstrap just won't run, defaulting to the 'glass' theme).
 #
-# img-src allows i.ytimg.com (video search-hit thumbnails, app/adapters/youtube.py
-# _hit_from_pytube_video) and yt3.ggpht.com / yt3.googleusercontent.com (channel
-# search-hit avatars, app/adapters/youtube.py _extract_channel_thumbnail — a
-# DIFFERENT host than video thumbnails). data: is needed for the CSS grain-
+# img-src allows i.ytimg.com (search-hit and playlist-row thumbnails,
+# app/adapters/youtube.py _hit / _fetch_playlist) and yt3.ggpht.com /
+# yt3.googleusercontent.com (channel avatars, app/adapters/youtube.py
+# _fetch_channel — a DIFFERENT host than video thumbnails). data: is needed for the CSS grain-
 # texture background-image (frontend/src/app.css / built CSS, --grain-image
 # custom prop).
 #

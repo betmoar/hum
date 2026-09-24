@@ -139,7 +139,7 @@ See [.env.example](.env.example). All settings via environment variables.
 
 Ports-and-adapters layout. Three load-bearing invariants:
 
-1. `pytubefix` is imported in exactly one file: `app/adapters/youtube.py`
+1. `yt_dlp` is imported in exactly one file: `app/adapters/youtube.py`
 2. Upstream HTTP goes through exactly one `httpx.AsyncClient` in `app/adapters/upstream_http.py`
 3. Stream URLs handed to clients are always Blake3-HMAC-signed; raw YouTube CDN URLs never leave the proxy
 
@@ -152,17 +152,21 @@ app/
 ├── auth.py               Bearer + Blake3 URL signing
 ├── models.py             Pydantic response shapes
 ├── adapters/
-│   ├── youtube.py        Only file that imports pytubefix
+│   ├── youtube.py        Only file that imports yt_dlp
 │   └── upstream_http.py  Shared httpx.AsyncClient + YouTube host allowlist
 ├── api/                  GET routes: search, video, channel, playlist
 └── proxy/                GET routes: audio, video, thumbnail (range pass-through)
 ```
 
-## Why pytubefix?
+## Why yt-dlp?
 
-An earlier version used the `innertube` Python library. As of mid-2026, all `innertube` client types return `UNPLAYABLE` or HTTP 400 for player calls — YouTube has hardened against unauthenticated raw-InnerTube access. `pytubefix` bundles a Node binary to handle JS-based cipher deobfuscation, which is currently the only way to extract working stream URLs without a full browser.
+An earlier version used the `innertube` Python library, then `pytubefix`. As of
+2026-09-24, `pytubefix` was measured blocked on 14 of 15 playable ids; `yt-dlp` played
+all of them and cut search p50 from ~5.3 s to ~1.3 s. yt-dlp needs the
+[deno](https://deno.com) JavaScript runtime on PATH (the Docker image ships it via
+`denoland/deno:bin-2.9.7`) to solve YouTube's JS challenges.
 
-If pytubefix breaks (it eventually will), the fix lives in `app/adapters/youtube.py` only.
+If yt-dlp breaks (it eventually will), the fix lives in `app/adapters/youtube.py` only.
 
 ## Limitations
 
@@ -170,7 +174,7 @@ If pytubefix breaks (it eventually will), the fix lives in `app/adapters/youtube
 - No rate limiting beyond the bearer token gate
 - In-memory stream URL cache only (5-min TTL); restart loses it
 - Not for public deployment without further hardening
-- pytubefix is reverse-engineered; YouTube can break it without notice
+- yt-dlp's YouTube extractor is reverse-engineered; YouTube can break it without notice
 
 ## License
 

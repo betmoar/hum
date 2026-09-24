@@ -67,16 +67,26 @@ def test_api_hls_unknown_itag_is_404_not_500(
 def test_api_video_unavailable_video_is_404_not_500(
     client: TestClient, bearer_token: str, mocker: MockerFixture
 ) -> None:
-    """pytubefix raises VideoUnavailable (private/removed video). The adapter
-    must map the whole PytubeFixError hierarchy to YouTubeError."""
-    from pytubefix.exceptions import VideoUnavailable
+    """yt-dlp raises DownloadError for a private/removed video. The adapter
+    must map its "Video unavailable"-style wording to YouTubeError."""
+    from yt_dlp.utils import DownloadError
 
     from app.adapters import youtube
 
-    def raise_unavailable(video_id: str) -> object:
-        raise VideoUnavailable(video_id)
+    def raise_unavailable(opts: dict) -> object:
+        class _Ydl:
+            def __enter__(self) -> _Ydl:
+                return self
 
-    mocker.patch.object(youtube, "_make_youtube", raise_unavailable)
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def extract_info(self, url: str, download: bool = False) -> object:
+                raise DownloadError("ERROR: [youtube] dQw4w9WgXcQ: Video unavailable")
+
+        return _Ydl()
+
+    mocker.patch.object(youtube, "_make_ydl", raise_unavailable)
     r = client.get(
         "/api/video/dQw4w9WgXcQ", headers={"Authorization": f"Bearer {bearer_token}"}
     )
@@ -89,14 +99,26 @@ def test_api_video_bot_detection_is_503(
 ) -> None:
     """Anti-bot walls are an operational incident ("YouTube is blocking us"),
     not a missing video. 503 + YOUTUBE_BLOCKED is the 3am signal."""
-    from pytubefix.exceptions import BotDetection
+    from yt_dlp.utils import DownloadError
 
     from app.adapters import youtube
 
-    def raise_bot(video_id: str) -> object:
-        raise BotDetection(video_id)
+    def raise_bot(opts: dict) -> object:
+        class _Ydl:
+            def __enter__(self) -> _Ydl:
+                return self
 
-    mocker.patch.object(youtube, "_make_youtube", raise_bot)
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+            def extract_info(self, url: str, download: bool = False) -> object:
+                raise DownloadError(
+                    "ERROR: [youtube] dQw4w9WgXcQ: Sign in to confirm you're not a bot"
+                )
+
+        return _Ydl()
+
+    mocker.patch.object(youtube, "_make_ydl", raise_bot)
     r = client.get(
         "/api/video/dQw4w9WgXcQ", headers={"Authorization": f"Bearer {bearer_token}"}
     )

@@ -315,6 +315,18 @@ class AppStore {
     if (t) this.playNow(t);
   }
 
+  /** Enqueue tracks from listing metadata alone (playlist browse) — no
+   * per-track /api/video call. URLs stay empty; Player.svelte's rehydrate
+   * effect fetches a fresh signed URL when the track starts, exactly as for
+   * a queue restored from localStorage. */
+  enqueueStubs(
+    items: { videoId: string; title: string; author: string; durationSeconds: number; thumbnailUrl: string }[],
+    opts?: { next?: boolean },
+  ): void {
+    const stubs = items.map((it) => ({ ...it, audioUrl: '', itag: 0, queueId: crypto.randomUUID() }));
+    this.queue = opts?.next ? [...stubs, ...this.queue] : [...this.queue, ...stubs];
+  }
+
   async enqueueById(videoId: string): Promise<void> {
     const t = await this.#fetchTrack(videoId, this.settings.defaultQuality);
     if (t) this.enqueue(t);

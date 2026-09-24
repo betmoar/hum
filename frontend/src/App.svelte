@@ -391,6 +391,7 @@
      nav so this change doesn't disturb the desktop design. */
   .nav-links a :global(svg) { display: none; }
   .queue-count {
+    margin-left: 0.35em;
     color: var(--ink-faint);
     font-size: var(--t-xs);
     font-weight: 400;

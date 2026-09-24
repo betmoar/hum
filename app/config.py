@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # App
     app_name: str = "Hum"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     debug: bool = False
 
     # Server
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # CORS — comma-separated origins; default localhost only
     cors_origins: str = "http://127.0.0.1,http://localhost"
+
 
     # Upstream
     upstream_connect_timeout: float = 10.0

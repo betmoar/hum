@@ -16,8 +16,8 @@ uv run pytest -m integration   # 5 tests against real YouTube (opt-in, needs net
 
 ## The three invariants (enforced by tests/unit/test_invariants.py)
 
-1. **`pytubefix` is imported in exactly one file:** `app/adapters/youtube.py`.
-   YouTube breaks pytubefix regularly; this keeps the fix a one-file job.
+1. **`yt_dlp` is imported in exactly one file:** `app/adapters/youtube.py`.
+   YouTube breaks the extractor regularly; this keeps the fix a one-file job.
 2. **Exactly one `httpx.AsyncClient`**, built in `app/adapters/upstream_http.py`.
    One pool, one timeout policy, one host allowlist (enforced per redirect hop).
 3. **Raw YouTube CDN URLs never leave the server.** Everything handed to clients is a
@@ -31,7 +31,7 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
 
 | File | Why it's load-bearing |
 |---|---|
-| `app/adapters/youtube.py` | The only pytubefix boundary. Stream URL cache + single-flight refresh + error mapping live here. Most fragile file in the repo — YouTube changes underneath it. |
+| `app/adapters/youtube.py` | The only yt-dlp boundary. Stream URL cache + single-flight refresh + error mapping live here. Most fragile file in the repo — YouTube changes underneath it. |
 | `app/auth.py` | All four signing schemes (format URL, live manifest, live segment, bearer). A payload-format change invalidates every URL clients hold. |
 | `app/adapters/upstream_http.py` | The one HTTP client + host allowlist. All upstream bytes flow through it. |
 | `app/proxy/_common.py` | verify → resolve → stream pipeline shared by audio and video proxies. |
@@ -56,8 +56,6 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
 
 ## Landmines (things that look wrong but are right, and vice versa)
 
-- **`_is_currently_live` requires `value is True`, not truthiness** — MagicMock-shaped
-  test fixtures would otherwise take the live path. Don't "simplify" it.
 - **The upstream client has NO total timeout** (connect/read/write only). Long media
   streams are normal; adding a total timeout kills them mid-track.
 - **`_stream_url_cache` is written from `asyncio.to_thread` workers** and read from the
@@ -88,6 +86,6 @@ risk in `docs/BACKLOG.md`).
 ## When YouTube breaks (it will)
 
 Symptom: `/api/video` returns 502/503, `YOUTUBE_BLOCKED` or `UPSTREAM_FAILURE` in logs.
-Go to `docs/PLAYBOOKS.md` § "pytubefix broke". Short version: reproduce with
-`uv run pytest -m integration`, bump pytubefix, check its issue tracker; the fix is
-confined to `app/adapters/youtube.py` by invariant 1.
+Go to `docs/PLAYBOOKS.md` § "yt-dlp broke". Short version: reproduce with
+`uv run pytest -m integration`, bump yt-dlp, check the EJS wiki / its issue tracker;
+the fix is confined to `app/adapters/youtube.py` by invariant 1.

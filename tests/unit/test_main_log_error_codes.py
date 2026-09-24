@@ -236,3 +236,89 @@ def test_success_response_has_no_code_suffix(caplog):
     line = access_records[0].getMessage()
     assert "-> 200" in line
     assert "code=" not in line
+
+
+def test_httpx_request_lines_are_not_logged_at_info() -> None:
+    """httpx logs every request URL at INFO — for proxied media that is a signed
+    googlevideo URL carrying the server's IP and sig/lsig. Hum's own hum.access
+    line already records each request, so httpx is capped at WARNING."""
+    from app.main import _configure_logging
+
+    httpx_logger = logging.getLogger("httpx")
+    saved = httpx_logger.level
+    httpx_logger.setLevel(logging.NOTSET)
+    try:
+        _configure_logging()
+        # The logger's OWN level: effective level would inherit the root's,
+        # which pytest already sets to WARNING, hiding a missing cap.
+        assert httpx_logger.level >= logging.WARNING
+    finally:
+        httpx_logger.setLevel(saved)
+
+
+def test_every_log_record_redacts_signed_cdn_urls() -> None:
+    """One chokepoint instead of per-call-site redaction: any logger (httpx,
+    uvicorn, yt-dlp, ours) reaching the root handlers gets googlevideo URLs
+    redacted, at every level."""
+    import io
+
+    from app.main import _configure_logging
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        _configure_logging()
+        url = "https://rr1---sn.googlevideo.com/videoplayback?ip=203.0.113.9&sig=SECRET"
+        logging.getLogger("httpx").warning("request to %s failed", url)
+        logging.getLogger("some.lib").error("boom %r", ValueError(url))
+    finally:
+        root.removeHandler(handler)
+    out = buf.getvalue()
+    assert out.count("<googlevideo-url>") == 2
+    assert "SECRET" not in out and "203.0.113.9" not in out
+
+
+def test_log_redaction_covers_exception_tracebacks() -> None:
+    import io
+
+    from app.main import _configure_logging
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        _configure_logging()
+        url = "https://rr1---sn.googlevideo.com/videoplayback?ip=203.0.113.9&sig=SECRET"
+        try:
+            raise RuntimeError(f"failed fetching {url}")
+        except RuntimeError:
+            logging.getLogger("some.lib").exception("fetch failed")
+    finally:
+        root.removeHandler(handler)
+    out = buf.getvalue()
+    assert "Traceback" in out and "<googlevideo-url>" in out
+    assert "SECRET" not in out and "203.0.113.9" not in out
+
+
+def test_redaction_filter_never_raises_into_the_caller() -> None:
+    """A malformed log call must stay logging's problem (handleError), not
+    raise TypeError at the call site — a filter runs outside emit()'s try."""
+    from app.main import _RedactCdnUrls
+
+    record = logging.LogRecord("some.lib", logging.WARNING, __file__, 1, "two %s %s", ("one",), None)
+    # Before the fix: getMessage() raised TypeError out of filter() into the
+    # caller. Now the record passes through untouched for emit()/handleError.
+    assert _RedactCdnUrls().filter(record) is True
+    assert record.msg == "two %s %s" and record.args == ("one",)
+
+
+def test_redaction_covers_uvicorn_loggers() -> None:
+    from app.main import _configure_logging, _RedactCdnUrls
+
+    _configure_logging()
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        lg = logging.getLogger(name)
+        assert any(isinstance(f, _RedactCdnUrls) for f in lg.filters), name

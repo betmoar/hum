@@ -130,6 +130,30 @@ describe('AppStore', () => {
     expect(s.queue.map((x) => x.videoId)).toEqual(['z', 'a', 'b']);
   });
 
+  it('enqueueStubs appends by default', async () => {
+    const s = await freshStore();
+    s.enqueue(t('x'));
+    s.enqueueStubs([
+      { videoId: 'a', title: 'A', author: '', durationSeconds: 1, thumbnailUrl: '' },
+      { videoId: 'b', title: 'B', author: '', durationSeconds: 1, thumbnailUrl: '' },
+    ]);
+    expect(s.queue.map((q) => q.videoId)).toEqual(['x', 'a', 'b']);
+  });
+
+  it('enqueueStubs({ next: true }) inserts at the front of the queue, in order', async () => {
+    const s = await freshStore();
+    s.enqueue(t('x'));
+    s.enqueue(t('y'));
+    s.enqueueStubs(
+      [
+        { videoId: 'b', title: 'B', author: '', durationSeconds: 1, thumbnailUrl: '' },
+        { videoId: 'c', title: 'C', author: '', durationSeconds: 1, thumbnailUrl: '' },
+      ],
+      { next: true },
+    );
+    expect(s.queue.map((q) => q.videoId)).toEqual(['b', 'c', 'x', 'y']);
+  });
+
   it('enqueue assigns a stable queueId to each track', async () => {
     const s = await freshStore();
     s.enqueue(t('a'));

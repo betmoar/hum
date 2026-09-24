@@ -9,7 +9,7 @@ from app.models import SearchHit, SearchResponse
 
 router = APIRouter(prefix="/api", tags=["radio"])
 
-# pytubefix Search requires a non-empty query string; this seed query plus
+# YouTube search needs a non-empty query string; this seed query plus
 # the Live + music-topic filters produce a live-music-only result set.
 RADIO_SEED_QUERY = "live music"
 
@@ -17,10 +17,10 @@ RADIO_SEED_QUERY = "live music"
 def _looks_live(h: SearchHit) -> bool:
     """Decide whether a search hit is currently a live stream.
 
-    pytubefix's `v.is_live` is unreliable for search results — it's often
-    `None` even for currently-live streams. Combine the explicit flag with
-    the duration heuristic: true live streams have no duration set (None
-    or 0); VOD has a real length.
+    Flat search results only mark `is_live=True` when yt-dlp sees
+    `live_status == "is_live"`; otherwise it's `None`, not `False`. Combine
+    the explicit flag with the duration heuristic: true live streams have no
+    duration set (None or 0); VOD has a real length.
     """
     if h.is_live is True:
         return True

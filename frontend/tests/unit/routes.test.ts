@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { router } from '../../src/routes.svelte';
 import Search from '../../src/pages/Search.svelte';
 import Video from '../../src/pages/Video.svelte';
+import Playlist from '../../src/pages/Playlist.svelte';
 import Queue from '../../src/pages/Queue.svelte';
 import Radio from '../../src/pages/Radio.svelte';
 import Settings from '../../src/pages/Settings.svelte';
@@ -45,6 +46,12 @@ describe('router matchPath', () => {
   it('preserves an 11-char video id with no trailing slash', () => {
     go('/video/abcdefghijk');
     expect(router.match.params.id).toBe('abcdefghijk');
+  });
+
+  it('captures the /playlist/:id param', () => {
+    go('/playlist/PL1234567890');
+    expect(router.match.component).toBe(Playlist);
+    expect(router.match.params).toEqual({ id: 'PL1234567890' });
   });
 
   it('falls back to Search for an unknown path', () => {

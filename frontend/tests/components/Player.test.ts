@@ -305,3 +305,72 @@ describe('Player — AirPlay button', () => {
   });
 });
 
+
+describe('Player — stub tracks (playlist enqueue)', () => {
+  it('fetches a signed URL when a URL-less queued track becomes current', async () => {
+    const { api } = await import('../../src/lib/api');
+    const low = { itag: 139, mime_type: 'audio/mp4; codecs="mp4a.40.5"', bitrate: 48000, codec: 'aac',
+      url: '/proxy/audio/stub1?itag=139&exp=1&sig=' + '5'.repeat(32) } as AudioFormat;
+    const fmt = { itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'aac',
+      url: '/proxy/audio/stub1?itag=140&exp=1&sig=' + '4'.repeat(32) } as AudioFormat;
+    // yt-dlp order: lowest first. A stub has no itag, so the tier decides.
+    const spy = vi.spyOn(api, 'video').mockResolvedValue({ video_id: 'stub1', audio_formats: [low, fmt] } as never);
+    store.enqueueStubs([{ videoId: 'stub1', title: 'S', author: 'A', durationSeconds: 10, thumbnailUrl: '' }]);
+    store.playNow(store.queue[0]);
+    const { container } = render(Player);
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('stub1'));
+    await vi.waitFor(() => expect((container.querySelector('audio') as HTMLAudioElement).src).toContain('/proxy/audio/stub1'));
+    expect(store.player.current?.itag).not.toBe(139);
+    spy.mockRestore();
+  });
+});
+
+describe('Player — rehydrate writes back qualityTier (review finding #3)', () => {
+  it('a stub with no itag/qualityTier gets qualityTier set to the fallback tier used', async () => {
+    const { api } = await import('../../src/lib/api');
+    const fmt = { itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'aac',
+      url: '/proxy/audio/stub2?itag=140&exp=1&sig=' + '4'.repeat(32) } as AudioFormat;
+    const spy = vi.spyOn(api, 'video').mockResolvedValue({ video_id: 'stub2', audio_formats: [fmt] } as never);
+    store.enqueueStubs([{ videoId: 'stub2', title: 'S', author: 'A', durationSeconds: 10, thumbnailUrl: '' }]);
+    store.playNow(store.queue[0]);
+    expect(store.player.current?.qualityTier).toBeUndefined();
+    render(Player);
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('stub2'));
+    await vi.waitFor(() => expect(store.player.current?.qualityTier).toBe(store.settings.defaultQuality));
+    spy.mockRestore();
+  });
+});
+
+describe('Player — rehydrate skips unplayable tracks (review finding #4)', () => {
+  it('advances to the next queued track when the rehydrate fetch rejects', async () => {
+    const { api } = await import('../../src/lib/api');
+    const spy = vi.spyOn(api, 'video').mockImplementation((id: string) => {
+      if (id === 'bad') return Promise.reject(new Error('gone'));
+      return Promise.resolve({
+        video_id: 'b', title: 'B', author: 'A', duration_seconds: 10, thumbnail_url: '',
+        audio_formats: [{ itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'aac', url: '/proxy/audio/b?itag=140' }],
+      } as never);
+    });
+    store.enqueueStubs([{ videoId: 'b', title: 'B', author: 'A', durationSeconds: 10, thumbnailUrl: '' }]);
+    store.playNow({ videoId: 'bad', title: 'Bad', author: 'A', durationSeconds: 10, thumbnailUrl: '', audioUrl: '', itag: 0 });
+    render(Player);
+    await vi.waitFor(() => expect(store.player.current?.videoId).toBe('b'));
+    spy.mockRestore();
+  });
+});
+
+describe('Player — live stub tracks', () => {
+  it('turns a URL-less stub into a live track when the video is live', async () => {
+    const { api } = await import('../../src/lib/api');
+    const spy = vi.spyOn(api, 'video').mockResolvedValue({
+      video_id: 'live1', is_live: true, audio_formats: [], title: 'Radio', author: 'A',
+      duration_seconds: 0, thumbnail_url: '', live_stream_url: '/api/live/live1/manifest.m3u8?exp=1&sig=x',
+    } as never);
+    store.enqueueStubs([{ videoId: 'live1', title: 'Radio', author: 'A', durationSeconds: 0, thumbnailUrl: '' }]);
+    store.playNow(store.queue[0]);
+    render(Player);
+    await vi.waitFor(() => expect(store.player.current?.isLive).toBe(true));
+    expect(store.player.current?.liveStreamUrl).toContain('/api/live/live1/manifest.m3u8');
+    spy.mockRestore();
+  });
+});

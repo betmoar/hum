@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.adapters import upstream_http
+from app.adapters import upstream_http, youtube
 from app.adapters.upstream_http import UpstreamHostError, UpstreamRangeError, UpstreamStatusError
 from app.adapters.youtube import YouTubeError
 from app.api import channel, hls, live, playlist, radio, search, video
@@ -23,6 +23,33 @@ from app.proxy import video as proxy_video
 # ----- Logging --------------------------------------------------------------
 
 
+class _RedactCdnUrls(logging.Filter):
+    """Backstop for invariant 3 in logs: every record reaching a root handler
+    has signed googlevideo URLs redacted, whichever library logged it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Filters run outside Handler.emit()'s error handling: a malformed
+        # record (bad %-args) must stay logging's problem, not raise into the
+        # caller. Leave it untouched; emit() reports it via handleError.
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        redacted = youtube.redact_cdn_urls(msg)
+        if redacted != msg:
+            record.msg, record.args = redacted, None
+        # Tracebacks are formatted after filters run: pre-render them here
+        # (Formatter reuses record.exc_text) and drop exc_info.
+        if record.exc_info:
+            record.exc_text = youtube.redact_cdn_urls(
+                logging.Formatter().formatException(record.exc_info)
+            )
+            record.exc_info = None
+        if record.stack_info:
+            record.stack_info = youtube.redact_cdn_urls(record.stack_info)
+        return True
+
+
 def _configure_logging() -> None:
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -31,6 +58,21 @@ def _configure_logging() -> None:
     else:
         fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
     logging.basicConfig(level=level, format=fmt)
+    # httpx logs every request URL at INFO; for media those are signed
+    # googlevideo URLs with the server's IP. hum.access already logs requests.
+    logging.getLogger("httpx").setLevel(max(level, logging.WARNING))
+    # Root handlers catch everything that propagates. uvicorn's loggers have
+    # their own handlers and propagate=False, so they get the filter directly
+    # (logger filters apply to records logged there; handler filters to all
+    # records those handlers emit).
+    targets: list[logging.Filterer] = list(logging.getLogger().handlers)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        lg = logging.getLogger(name)
+        targets.append(lg)
+        targets.extend(lg.handlers)
+    for t in targets:
+        if not any(isinstance(f, _RedactCdnUrls) for f in t.filters):
+            t.addFilter(_RedactCdnUrls())
 
 
 # ----- App ------------------------------------------------------------------
@@ -40,6 +82,7 @@ def _configure_logging() -> None:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     _configure_logging()
     logging.getLogger("hum").info("starting up")
+    youtube.check_backend_requirements()
     yield
     await upstream_http.close()
     logging.getLogger("hum").info("shut down")

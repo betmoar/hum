@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-24
+
+### Changed
+
+- **`pytubefix` is replaced entirely by `yt-dlp`** — no backend switch, no fallback.
+  Video details, search, channel, playlist, and the live HLS master manifest all go
+  through `yt-dlp` now; `yt_dlp` is imported in exactly one file
+  (`app/adapters/youtube.py`, invariant 1). Measured 2026-09-24: pytubefix was blocked
+  on 14 of 15 playable ids (`YOUTUBE_BLOCKED`); yt-dlp played all 13 VODs and 2 live
+  streams through the proxy, and search p50 dropped from 5.32 s to 1.28 s with
+  90–100% titled hits (was 0–5%, fixes empty search titles, #14). Cold video lookups
+  are slower (~2.3 s p50 vs a working pytubefix's ~0.3 s). Needs the
+  [deno](https://deno.com) JavaScript runtime on PATH; the Docker image ships it via
+  `denoland/deno:bin-2.9.7`, and the app logs one ERROR at startup if deno is missing.
+  Channel `subscriber_count` is now populated (yt-dlp `channel_follower_count`).
+  Loudness normalisation data (`loudnessDb`) is not available under yt-dlp.
+
+### Added
+
+- **Browse playlists from search**: playlist hits open a playlist page
+  (`#/playlist/<id>`) with play-now / enqueue per track plus "Play all" and
+  "Enqueue all". Bulk enqueue uses the playlist listing's metadata — no
+  per-track `/api/video` call; the signed URL is fetched when a track starts.
+
+### Fixed
+
+- yt-dlp: "This video is unavailable" now maps to 404 `VIDEO_UNAVAILABLE` instead of
+  502 `UPSTREAM_FAILURE`.
+- Search filters (`category=music`, `live=true`) sent sort-order instead of
+  type=Video (protobuf field 1 vs 2), so filtered searches could return nothing
+  ("verknipt" + music: 0 results). Live searches now return videos only; music
+  searches return videos and (browsable) playlists, no channels.
+- Search no longer lists YouTube "Mix" playlists (`RD…` ids): YouTube refuses to
+  open them as playlists.
+- Error responses no longer echo yt-dlp's raw error text, which can contain
+  signed CDN URLs; the raw text goes to the server log.
+- A live video without an HLS manifest now fails at `/api/video` with 502
+  `LIVE_UNAVAILABLE` instead of returning an unplayable live track.
+- `httpx` request logging is capped at WARNING: at INFO it logged every signed
+  googlevideo URL, including the server's IP.
+
+### Removed
+
+- `YT_BACKEND` setting, `app/adapters/youtube_ytdlp.py` (absorbed into
+  `app/adapters/youtube.py`), and the `pytubefix` dependency along with its
+  transitive deps (`aiohttp`, `nodejs-wheel-binaries`) and the Dockerfile's
+  pytubefix `__cache__` dir workaround. `scripts/bench_yt_backends.py` and
+  `scripts/bench_yt_set.json` are deleted (the pytubefix/yt-dlp comparison is over;
+  the result stays in `docs/dev/ytdlp-spike-report.md` as a historical record),
+  replaced by `scripts/capture_ytdlp_fixtures.py` for re-capturing yt-dlp test
+  fixtures.
+
 ## [0.1.2] - 2026-07-29
 
 ### Added
@@ -106,7 +158,8 @@ First tagged release of Hum — a self-hosted YouTube audio streamer.
   3.11/3.12) and frontend (svelte-check, vitest, vite build); tag-triggered
   release workflow.
 
-[Unreleased]: https://github.com/betmoar/hum/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/betmoar/hum/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/betmoar/hum/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/betmoar/hum/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/betmoar/hum/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/betmoar/hum/releases/tag/v0.1.0

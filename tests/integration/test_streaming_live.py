@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,10 +11,14 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client() -> Iterator[TestClient]:
     from app.main import app
 
-    return TestClient(app)
+    # Context manager runs lifespan, which closes the module-level upstream
+    # httpx client. Without it the client outlives this test's event loop and
+    # the next parametrized run fails with "Event loop is closed".
+    with TestClient(app) as c:
+        yield c
 
 
 def test_video_endpoint_to_audio_first_chunk(client: TestClient) -> None:
