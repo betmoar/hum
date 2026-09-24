@@ -56,13 +56,15 @@ def encode_message(msg: Message) -> str:
 def build_search_sp(*, category: str | None, live: bool) -> str | None:
     """The `sp` value for Hum's search options, or None when unfiltered.
 
-    Any filter implies type=Video (field 2 of the filter message — field 1 is
-    sort order); fields are emitted in ascending order.
+    Live implies type=Video (field 2 of the filter message — field 1 is sort
+    order). Music alone sets only the topic, so playlists stay in the results
+    (type=Video would drop them). Fields are emitted in ascending order.
     """
     if not category and not live:
         return None
-    inner: Message = {2: 1}
+    inner: Message = {}
     if live:
+        inner[2] = 1
         inner[8] = 1
     if category == "music":
         inner[19] = MUSIC_TOPIC_ID

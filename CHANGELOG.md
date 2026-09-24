@@ -34,7 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   502 `UPSTREAM_FAILURE`.
 - Search filters (`category=music`, `live=true`) sent sort-order instead of
   type=Video (protobuf field 1 vs 2), so filtered searches could return nothing
-  ("verknipt" + music: 0 results). Filtered searches now return videos only.
+  ("verknipt" + music: 0 results). Live searches now return videos only; music
+  searches return videos and (browsable) playlists, no channels.
 - Search no longer lists YouTube "Mix" playlists (`RD…` ids): YouTube refuses to
   open them as playlists.
 - Error responses no longer echo yt-dlp's raw error text, which can contain

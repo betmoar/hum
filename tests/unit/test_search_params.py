@@ -15,7 +15,7 @@ from app.adapters.search_params import build_search_sp, encode_message
     ("category", "live", "expected"),
     [
         (None, False, None),
-        ("music", False, "Eg0QAZoBCC9tLzA0cmxm"),
+        ("music", False, "EguaAQgvbS8wNHJsZg=="),
         (None, True, "EgQQAUAB"),
         ("music", True, "Eg8QAUABmgEIL20vMDRybGY="),
     ],

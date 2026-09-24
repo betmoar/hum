@@ -304,8 +304,8 @@ def test_search_limit_and_url(monkeypatch: pytest.MonkeyPatch) -> None:
     hits = youtube._search_hits("daft punk", 2, "Eg0IAZoBCC9tLzA0cmxm")
     assert len(hits) == 2
     opts, url = FakeYDL.calls[0]
-    # Filtered (sp set): over-fetched, see test_filtered_search_overfetches_to_keep_limit.
-    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 2 + youtube._FILTERED_SEARCH_SLACK
+    # No kind filter passed: fetch exactly `limit` (over-fetch is tested separately).
+    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 2
     qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     assert qs["search_query"] == ["daft punk"]
     assert qs["sp"] == ["Eg0IAZoBCC9tLzA0cmxm"]
@@ -716,23 +716,39 @@ def test_search_music_filter_sends_video_type() -> None:
     (sort-by-upload-date) returned 0 results for 'verknipt' (measured 2026-09-24)."""
     from app.adapters.search_params import build_search_sp, encode_message
 
-    assert build_search_sp(category="music", live=False) == encode_message({2: {2: 1, 19: "/m/04rlf"}})
+    # Music alone: topic only, no type=Video, so playlists stay in the results.
+    assert build_search_sp(category="music", live=False) == encode_message({2: {19: "/m/04rlf"}})
     assert build_search_sp(category=None, live=True) == encode_message({2: {2: 1, 8: 1}})
 
 
-def test_filtered_search_returns_only_videos(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With category/live set, YouTube still mixes in channels and playlists
-    (type=Video is ignored once a topic is set — measured 2026-09-24)."""
-    entries = [
-        {"_type": "url", "ie_key": "YoutubeTab", "id": "UCchannel0000000000000",
-         "url": "https://www.youtube.com/channel/UCchannel0000000000000", "title": "Chan"},
-        {"_type": "url", "ie_key": "YoutubeTab", "id": "PLabcdefghijk",
-         "url": "https://www.youtube.com/playlist?list=PLabcdefghijk", "title": "List"},
-        SEARCH_INFO["entries"][0],
-    ]
-    _install(monkeypatch, {"entries": entries})
-    assert [h.kind for h in youtube._search_hits("q", 10, "Eg0QAZoBCC9tLzA0cmxm")] == ["video"]
-    assert {h.kind for h in youtube._search_hits("q", 10, None)} == {"video", "channel", "playlist"}
+_MIXED_ENTRIES: list[dict[str, Any]] = [
+    {"_type": "url", "ie_key": "YoutubeTab", "id": "UCchannel0000000000000",
+     "url": "https://www.youtube.com/channel/UCchannel0000000000000", "title": "Chan"},
+    {"_type": "url", "ie_key": "YoutubeTab", "id": "PLabcdefghijk",
+     "url": "https://www.youtube.com/playlist?list=PLabcdefghijk", "title": "List"},
+    SEARCH_INFO["entries"][0],
+]
+
+
+@pytest.mark.parametrize(
+    ("category", "live", "kinds"),
+    [
+        (None, False, ["channel", "playlist", "video"]),
+        # Music: playlists stay browsable; channels can't be opened in Hum.
+        ("music", False, ["playlist", "video"]),
+        # Live: only videos can be live streams.
+        (None, True, ["video"]),
+        ("music", True, ["video"]),
+    ],
+)
+async def test_search_kinds_per_filter(
+    monkeypatch: pytest.MonkeyPatch, category: str | None, live: bool, kinds: list[str]
+) -> None:
+    """YouTube ignores type=Video once a topic is set (measured 2026-09-24),
+    so the adapter decides which kinds each filter returns."""
+    _install(monkeypatch, {"entries": _MIXED_ENTRIES})
+    hits = await youtube.search("q", limit=10, category=category, live=live)
+    assert sorted(h.kind for h in hits) == kinds
 
 
 # ---- review round 2 (PR #16) ------------------------------------------------
@@ -827,7 +843,7 @@ def test_filtered_search_overfetches_to_keep_limit(monkeypatch: pytest.MonkeyPat
             "url": "https://www.youtube.com/channel/UCchannel0000000000000", "title": "Chan"}
     vids = [{**SEARCH_INFO["entries"][0], "id": f"vid0000000{i}"} for i in range(3)]
     _install(monkeypatch, {"entries": [chan, *vids]})
-    hits = youtube._search_hits("q", 3, "Eg0QAZoBCC9tLzA0cmxm")
+    hits = youtube._search_hits("q", 3, "Eg0QAZoBCC9tLzA0cmxm", kinds=frozenset({"video"}))
     assert [h.kind for h in hits] == ["video"] * 3
     assert FakeYDL.calls[0][0]["playlistend"] > 3
 
@@ -847,5 +863,5 @@ def test_captured_fixture_urls_do_not_expire() -> None:
 
 def test_unfiltered_search_fetches_exactly_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, SEARCH_INFO)
-    youtube._search_hits("q", 7, None)
+    youtube._search_hits("q", 7, None, kinds=None)
     assert FakeYDL.calls[0][0]["playlistend"] == 7

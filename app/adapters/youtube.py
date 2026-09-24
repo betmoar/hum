@@ -272,7 +272,8 @@ async def _run_search(
 ) -> list[SearchHit]:
     """The uncached search fetch, run inside search()'s single-flight task."""
     sp = build_search_sp(category=category, live=live)
-    hits = await asyncio.to_thread(_search_hits, query, limit, sp)
+    hits = await asyncio.to_thread(_search_hits, query, limit, sp,
+                                   kinds=_search_kinds(category=category, live=live))
     _store_search_hits(hits, cache_key)
     return hits
 
@@ -728,16 +729,32 @@ def _hit(entry: Any) -> SearchHit | None:
 _FILTERED_SEARCH_SLACK = 10
 
 
-def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
+def _search_kinds(*, category: str | None, live: bool) -> frozenset[str] | None:
+    """Which hit kinds a filtered search returns; None = everything.
+
+    Live: only videos can be live streams. Music: videos plus playlists
+    (browsable in Hum); channels can't be opened, so they're noise there.
+    YouTube doesn't enforce this itself (type=Video is ignored once a topic
+    is set — measured 2026-09-24)."""
+    if live:
+        return frozenset({"video"})
+    if category == "music":
+        return frozenset({"video", "playlist"})
+    return None
+
+
+def _search_hits(
+    query: str, limit: int, sp: str | None, *, kinds: frozenset[str] | None = None
+) -> list[SearchHit]:
     """Thread-bound. One flat results-page extraction: title, channel and
     duration come from the search response itself (no per-hit player call)."""
     params = {"search_query": query}
     if sp:
         params["sp"] = sp
     url = "https://www.youtube.com/results?" + urllib.parse.urlencode(params)
-    # Filtered searches drop non-video entries below; over-fetch so that
-    # doesn't eat into `limit` (a results page is one request either way).
-    fetch = limit if sp is None else limit + _FILTERED_SEARCH_SLACK
+    # Kind-filtered searches drop entries below; over-fetch so that doesn't
+    # eat into `limit` (a results page is one request either way).
+    fetch = limit if kinds is None else limit + _FILTERED_SEARCH_SLACK
     info = _extract(url, {**_FLAT_OPTS, "playlistend": fetch})
     hits: list[SearchHit] = []
     for entry in info.get("entries") or []:
@@ -746,9 +763,7 @@ def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
         except Exception:
             logger.debug("skipping malformed yt-dlp search entry", exc_info=True)
             continue
-        # Any filter means "videos only" (see search_params.build_search_sp),
-        # but YouTube ignores type=Video once a topic is set — enforce it here.
-        if hit is not None and (sp is None or hit.kind == "video"):
+        if hit is not None and (kinds is None or hit.kind in kinds):
             hits.append(hit)
             if len(hits) >= limit:
                 break
