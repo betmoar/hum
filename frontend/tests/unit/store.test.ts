@@ -744,3 +744,31 @@ describe('persisted current + history', () => {
     expect(s.startPositionFor({ ...t('L'), durationSeconds: 1200, isLive: true })).toBe(0);
   });
 });
+
+describe('review fixes — store', () => {
+  it('previous under repeat all does not duplicate the track in the queue', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    mod.playerControls.current = { getPosition: () => 0, seekTo: vi.fn() } as any;
+    s.player.repeat = 'all';
+    s.playNow(t('a'));
+    s.enqueue(t('b'));
+    s.enqueue(t('c'));
+    s.next(); // a -> tail of queue and history
+    s.previous();
+    expect(s.player.current?.videoId).toBe('a');
+    expect(s.queue.map((x) => x.videoId)).toEqual(['b', 'c']);
+    mod.playerControls.current = null;
+  });
+
+  it('previous on a live track goes to history regardless of position', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    mod.playerControls.current = { getPosition: () => 5000, seekTo: vi.fn() } as any;
+    s.playNow(t('a'));
+    s.playNow({ ...t('L'), isLive: true });
+    s.previous();
+    expect(s.player.current?.videoId).toBe('a');
+    mod.playerControls.current = null;
+  });
+});

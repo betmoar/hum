@@ -40,7 +40,12 @@
   // uncaught rejection is console noise at best. Route every imperative play
   // through here.
   function safePlay(a: HTMLAudioElement | null) {
-    void a?.play().catch(() => { /* requires user gesture / interrupted */ });
+    try {
+      // play() may return undefined (older engines, jsdom) — don't chain on it.
+      void a?.play()?.catch(() => { /* requires user gesture / interrupted */ });
+    } catch {
+      /* not supported */
+    }
   }
 
   let el = $state<HTMLAudioElement | null>(null);
@@ -226,6 +231,11 @@
       untrack(() => {
         const start = store.startPositionFor(t);
         if (start > 0) playerControls.current?.restoreAt?.(start);
+        // Don't rely on the autoplay attribute alone: a browser that fires
+        // `pause` while aborting the old load would flip isPlaying (and so
+        // autoplay) off before the new source is ready. play() here is
+        // queued against the new src. Live tracks start via hls.js.
+        if (store.player.isPlaying && !usesHls(t)) safePlay(el);
       });
     }
   });
@@ -362,7 +372,10 @@
           hls.on(Hls.Events.FRAG_BUFFERED, () => {
             if (playStarted) return;
             playStarted = true;
-            void audio.play().catch(() => { /* user-gesture required */ });
+            // A live track restored on reload stays paused (spec R1.2).
+            if (untrack(() => store.player.isPlaying)) {
+              void audio.play().catch(() => { /* user-gesture required */ });
+            }
           });
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (!data.fatal) return;
@@ -381,7 +394,9 @@
           hls.attachMedia(audio);
         } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
           audio.src = src;
-          void audio.play().catch(() => { /* user-gesture required */ });
+          if (untrack(() => store.player.isPlaying)) {
+            void audio.play().catch(() => { /* user-gesture required */ });
+          }
         } else {
           store.notify('Live playback is not supported in this browser.', 'error');
         }
@@ -495,8 +510,9 @@
     }
   }
 
+  // onended only. A manual skip (Next button, key, lock screen) keeps the
+  // resume point; finishing the track is what clears it.
   function advance() {
-    // Finished means nothing left to resume.
     const t = store.player.current;
     if (t) clearBookmark(t.videoId);
     store.next();
@@ -523,7 +539,11 @@
     // Is Hum itself reachable? If not, nothing below can succeed and each
     // step would burn a one-shot slot (codec swap, refetch) on a failure
     // that isn't the stream's. Say what's actually wrong instead.
-    if (await api.health().then(() => false, isUnreachable)) {
+    const unreachable = await api.health().then(() => false, isUnreachable);
+    // The user may have picked another track during the probe; recovering
+    // the old one now would overwrite it.
+    if (store.player.current?.videoId !== t.videoId) return;
+    if (unreachable) {
       store.notifyUnreachable(() => { if (el) { el.load(); safePlay(el); } });
       return;
     }
@@ -553,13 +573,10 @@
             // qualityTier is preserved — fallback doesn't change user intent
           };
           store.player.current = next;
-          if (el) {
-            el.addEventListener(
-              'loadedmetadata',
-              () => { if (el) el.currentTime = lastPos; },
-              { once: true },
-            );
-          }
+          // Through restoreAt (not a raw listener) so it replaces — rather
+          // than races — a still-pending start seek; at 0 the pending start
+          // seek (resume point) is left to fire.
+          if (lastPos > 0) playerControls.current?.restoreAt?.(lastPos);
           return;
         }
       }
@@ -585,6 +602,7 @@
     recoveredVideoIds.add(t.videoId);
     try {
       const fresh = await api.video(t.videoId);
+      if (store.player.current?.videoId !== t.videoId) return;
       const same = fresh.audio_formats.find((f) => f.itag === t.itag);
       if (same) {
         const lastPos = pos;
@@ -594,9 +612,7 @@
           hlsUrl: same.hls_url ?? undefined,
         };
         store.player.current = next;
-        if (el) {
-          el.addEventListener('loadedmetadata', () => { if (el) el.currentTime = lastPos; }, { once: true });
-        }
+        if (lastPos > 0) playerControls.current?.restoreAt?.(lastPos);
       }
     } catch {
       // Give up silently; user can hit Play again.
@@ -677,7 +693,7 @@
             <Icon name="pause" size={22} />
           {/if}
         </button>
-        <button class="ctrl" onclick={advance} aria-label="Next track">
+        <button class="ctrl" onclick={() => store.next()} aria-label="Next track">
           <Icon name="skip-forward" size={20} />
         </button>
         <button

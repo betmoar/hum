@@ -295,14 +295,24 @@ class AppStore {
   previous(): void {
     const cur = this.player.current;
     if (!cur) return;
+    // Restart only applies to seekable content; on live, previous always
+    // means "go back" (its playhead position is meaningless here).
+    const seekable = isSeekable(cur);
     const pos = playerControls.current?.getPosition?.() ?? 0;
-    if (pos > PREVIOUS_RESTART_THRESHOLD_S || this.history.length === 0) {
-      if (isSeekable(cur)) playerControls.current?.seekTo?.(0);
+    if (this.history.length === 0 || (seekable && pos > PREVIOUS_RESTART_THRESHOLD_S)) {
+      if (seekable) playerControls.current?.seekTo?.(0);
       return;
     }
     const prior = this.history[this.history.length - 1];
     this.history = this.history.slice(0, -1);
-    this.queue = [cur, ...this.queue];
+    // Under repeat 'all', next() also parked `prior` at the queue tail;
+    // taking it back must remove that copy or each round trip duplicates it.
+    let rest = this.queue;
+    const tail = rest[rest.length - 1];
+    if (this.player.repeat === 'all' && tail && tail.videoId === prior.videoId && tail.queueId === prior.queueId) {
+      rest = rest.slice(0, -1);
+    }
+    this.queue = [cur, ...rest];
     this.player.current = prior;
     this.player.isPlaying = true;
     this.player.positionSeconds = 0;

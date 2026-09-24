@@ -17,6 +17,8 @@ export class ApiError extends Error {
 // Status 0 is reserved: the request never reached Hum (server down, Wi-Fi
 // gone, laptop asleep). Distinct from a 5xx, which means Hum answered but
 // YouTube failed. Recovery UI keys off the difference.
+const HEALTH_TIMEOUT_MS = 3000;
+
 export function isUnreachable(e: unknown): boolean {
   return e instanceof ApiError && e.status === 0;
 }
@@ -81,7 +83,9 @@ export const api = {
   health: async (): Promise<void> => {
     let r: Response;
     try {
-      r = await fetch('/health');
+      // Bounded: a half-open connection must not stall recovery. No answer
+      // within HEALTH_TIMEOUT_MS on a LAN counts as unreachable.
+      r = await fetch('/health', { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
     } catch {
       throw new ApiError(0, 'hum server unreachable');
     }

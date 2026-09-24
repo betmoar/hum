@@ -553,3 +553,74 @@ describe('Player — resume, previous, media session, unreachable', () => {
     expect(video).not.toHaveBeenCalled();
   });
 });
+
+describe('Player — review fixes', () => {
+  it('codec-fallback recovery at position 0 keeps the pending start seek', async () => {
+    vi.spyOn(store, 'startPositionFor').mockReturnValue(1200);
+    const opus: AudioFormat = { itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus', url: '/proxy/audio/cf?itag=251' };
+    const aac: AudioFormat = { itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'mp4a.40.2', url: '/proxy/audio/cf?itag=140' };
+    store.playNow({
+      videoId: 'cf', title: 'T', author: 'A', durationSeconds: 7200, thumbnailUrl: '',
+      audioUrl: opus.url, itag: 251, qualityTier: 'hi', isLive: false, _formats: [opus, aac],
+    });
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    audio.dispatchEvent(new Event('error'));
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    expect(store.player.current?.itag).toBe(140);
+    let seek = -1;
+    Object.defineProperty(audio, 'currentTime', { get: () => seek, set: (v: number) => { seek = v; }, configurable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(seek).toBe(1200);
+  });
+
+  it('handleError does not clobber a track picked during the health probe', async () => {
+    let release!: () => void;
+    vi.spyOn(api, 'health').mockReturnValue(new Promise<void>((r) => { release = r; }));
+    const opus: AudioFormat = { itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus', url: '/proxy/audio/r1?itag=251' };
+    const aac: AudioFormat = { itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'mp4a.40.2', url: '/proxy/audio/r1?itag=140' };
+    store.playNow({
+      videoId: 'r1', title: 'A', author: 'A', durationSeconds: 100, thumbnailUrl: '',
+      audioUrl: opus.url, itag: 251, isLive: false, _formats: [opus, aac],
+    });
+    const { container } = render(Player);
+    await tick();
+    container.querySelector('audio')!.dispatchEvent(new Event('error'));
+    store.playNow(sampleTrack('r2', '/proxy/audio/r2?x'));
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    expect(store.player.current?.videoId).toBe('r2');
+  });
+
+  it('Next button keeps the bookmark (only ended clears it)', async () => {
+    localStorage.setItem('hum.bookmarks', JSON.stringify({ nb: { pos: 300, at: 1 } }));
+    store.playNow({ ...sampleTrack('nb', '/proxy/audio/nb?x'), durationSeconds: 1200 });
+    const { getByLabelText } = render(Player);
+    await tick();
+    getByLabelText('Next track').click();
+    expect(JSON.parse(localStorage.getItem('hum.bookmarks')!).nb.pos).toBe(300);
+  });
+
+  it('switching to a new track while playing calls play() explicitly', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    store.playNow(sampleTrack('s1', '/proxy/audio/s1?x'));
+    render(Player);
+    await tick();
+    play.mockClear();
+    store.playNow(sampleTrack('s2', '/proxy/audio/s2?x'));
+    await tick();
+    expect(play).toHaveBeenCalled();
+  });
+
+  it('a restored (paused) track is not played on mount', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    store.player.current = sampleTrack('rp', '/proxy/audio/rp?x');
+    store.player.isPlaying = false;
+    render(Player);
+    await tick();
+    expect(play).not.toHaveBeenCalled();
+  });
+});

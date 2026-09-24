@@ -236,7 +236,9 @@ describe('api — unreachable Hum server', () => {
     await expect(api.health()).resolves.toBeUndefined();
     const call = (globalThis.fetch as any).mock.calls[0];
     expect(call[0]).toBe('/health');
-    expect(call[1]).toBeUndefined();
+    expect(call[1]?.headers).toBeUndefined();
+    // Bounded: a half-open connection must not stall recovery forever.
+    expect(call[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('health rejection is status 0; isUnreachable detects it', async () => {
