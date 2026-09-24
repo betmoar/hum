@@ -1,0 +1,675 @@
+{
+ "videos": [
+  {
+   "backend": "pytubefix",
+   "item_id": "dQw4w9WgXcQ",
+   "label": "Rick Astley - Never Gonna Give You Up",
+   "expect": "vod",
+   "seconds": 0.3424536829988938,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    140,
+    249,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "kJQP7kiw5Fk",
+   "label": "Luis Fonsi - Despacito",
+   "expect": "vod",
+   "seconds": 0.2025365529989358,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "9bZkp7q19f0",
+   "label": "PSY - Gangnam Style",
+   "expect": "vod",
+   "seconds": 0.2886806699971203,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "JGwWNGJdvx8",
+   "label": "Ed Sheeran - Shape of You",
+   "expect": "vod",
+   "seconds": 0.2652798169874586,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "fJ9rUzIMcZQ",
+   "label": "Queen - Bohemian Rhapsody",
+   "expect": "vod",
+   "seconds": 0.23169485598918982,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "hTWKbfoikeg",
+   "label": "Nirvana - Smells Like Teen Spirit",
+   "expect": "vod",
+   "seconds": 0.28101340000284836,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "YQHsXMglC9A",
+   "label": "Adele - Hello",
+   "expect": "vod",
+   "seconds": 0.21597001201007515,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "RgKAFK5djSk",
+   "label": "Wiz Khalifa - See You Again",
+   "expect": "vod",
+   "seconds": 0.25280874100280926,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "OPf0YbXqDm0",
+   "label": "Mark Ronson - Uptown Funk",
+   "expect": "vod",
+   "seconds": 0.2510139610094484,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "60ItHLz5WEA",
+   "label": "Alan Walker - Faded",
+   "expect": "vod",
+   "seconds": 0.29612995899515226,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "lQ0iqwatAl8",
+   "label": "long VOD 2h (Brian Culbertson live, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 0.24884996199398302,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "UVByTzYL8KI",
+   "label": "long VOD 2h (Andrea Bocelli, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 0.3326542860013433,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "2loN0JFZa0Y",
+   "label": "long VOD 1h37 (MEUTE Live in Paris, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 0.204583096987335,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "7NOSDKb0HlU",
+   "label": "Lofi Girl radio (live, verified 2026-09-24)",
+   "expect": "live",
+   "seconds": 0.27166005902108736,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "4xDzrJKXOOY",
+   "label": "synthwave radio (live, verified 2026-09-24)",
+   "expect": "live",
+   "seconds": 0.2623801380104851,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "aaaaaaaaaaa",
+   "label": "nonexistent id (expected VIDEO_UNAVAILABLE)",
+   "expect": "error",
+   "seconds": 0.16826479800511152,
+   "ok": false,
+   "error": "VIDEO_UNAVAILABLE",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "pytubefix",
+   "item_id": "HtVdAasjOgU",
+   "label": "age-restricted (verified: Sign in to confirm your age)",
+   "expect": "error",
+   "seconds": 0.4464928279921878,
+   "ok": false,
+   "error": "YOUTUBE_BLOCKED",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "dQw4w9WgXcQ",
+   "label": "Rick Astley - Never Gonna Give You Up",
+   "expect": "vod",
+   "seconds": 4.791206430003513,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "kJQP7kiw5Fk",
+   "label": "Luis Fonsi - Despacito",
+   "expect": "vod",
+   "seconds": 2.071325755008729,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Luis Fonsi - Despacito ft. Daddy Yankee"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "9bZkp7q19f0",
+   "label": "PSY - Gangnam Style",
+   "expect": "vod",
+   "seconds": 4.243612782011041,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "PSY - GANGNAM STYLE(\uac15\ub0a8\uc2a4\ud0c0\uc77c) M/V"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "JGwWNGJdvx8",
+   "label": "Ed Sheeran - Shape of You",
+   "expect": "vod",
+   "seconds": 4.20507528600865,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Ed Sheeran - Shape of You (Official Music Video)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "fJ9rUzIMcZQ",
+   "label": "Queen - Bohemian Rhapsody",
+   "expect": "vod",
+   "seconds": 3.253070281993132,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Queen \u2013 Bohemian Rhapsody (Official Video Remastered)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "hTWKbfoikeg",
+   "label": "Nirvana - Smells Like Teen Spirit",
+   "expect": "vod",
+   "seconds": 2.324664309999207,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Nirvana - Smells Like Teen Spirit (Official Music Video)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "YQHsXMglC9A",
+   "label": "Adele - Hello",
+   "expect": "vod",
+   "seconds": 2.0065023269853555,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Adele - Hello (Official Music Video)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "RgKAFK5djSk",
+   "label": "Wiz Khalifa - See You Again",
+   "expect": "vod",
+   "seconds": 2.333283632993698,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Wiz Khalifa - See You Again ft. Charlie Puth [Official Video] Furious 7 Soundtrack"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "OPf0YbXqDm0",
+   "label": "Mark Ronson - Uptown Funk",
+   "expect": "vod",
+   "seconds": 2.3249005639809184,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Mark Ronson - Uptown Funk (Official Video) ft. Bruno Mars"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "60ItHLz5WEA",
+   "label": "Alan Walker - Faded",
+   "expect": "vod",
+   "seconds": 2.566983007011004,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Alan Walker - Faded"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "lQ0iqwatAl8",
+   "label": "long VOD 2h (Brian Culbertson live, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 2.075279454002157,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Brian Culbertson's \"Live in Las Vegas\" full 2-hour concert video"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "UVByTzYL8KI",
+   "label": "long VOD 2h (Andrea Bocelli, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 2.001154833007604,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "Andrea Bocelli - Under the Desert Sky 2006 (Full Concert HD)"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "2loN0JFZa0Y",
+   "label": "long VOD 1h37 (MEUTE Live in Paris, verified 2026-09-24)",
+   "expect": "vod",
+   "seconds": 2.5503801539889537,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    139,
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "MEUTE - Live in Paris [Full Concert]"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "7NOSDKb0HlU",
+   "label": "Lofi Girl radio (live, verified 2026-09-24)",
+   "expect": "live",
+   "seconds": 1.9257723200134933,
+   "ok": true,
+   "error": null,
+   "audio_itags": [],
+   "has_live_url": true,
+   "playable": false,
+   "title": "lofi hip hop radio - beats to study/relax to \ud83d\udc3e 2026-09-24 13:59"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "4xDzrJKXOOY",
+   "label": "synthwave radio (live, verified 2026-09-24)",
+   "expect": "live",
+   "seconds": 1.9690797880175523,
+   "ok": true,
+   "error": null,
+   "audio_itags": [],
+   "has_live_url": true,
+   "playable": false,
+   "title": "synthwave radio \ud83c\udf0c beats to chill/game to 2026-09-24 13:59"
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "aaaaaaaaaaa",
+   "label": "nonexistent id (expected VIDEO_UNAVAILABLE)",
+   "expect": "error",
+   "seconds": 1.0532775109750219,
+   "ok": false,
+   "error": "UPSTREAM_FAILURE",
+   "audio_itags": [],
+   "has_live_url": false,
+   "playable": false,
+   "title": ""
+  },
+  {
+   "backend": "ytdlp",
+   "item_id": "HtVdAasjOgU",
+   "label": "age-restricted (verified: Sign in to confirm your age)",
+   "expect": "error",
+   "seconds": 3.9208694779954385,
+   "ok": true,
+   "error": null,
+   "audio_itags": [
+    249,
+    250,
+    140,
+    251
+   ],
+   "has_live_url": false,
+   "playable": true,
+   "title": "The Witcher 3: Wild Hunt - The Sword Of Destiny Trailer"
+  }
+ ],
+ "searches": [
+  {
+   "backend": "pytubefix",
+   "query": "rick astley never gonna give you up",
+   "seconds": 7.539441422995878,
+   "ok": true,
+   "error": null,
+   "hits": 19,
+   "titled_fraction": 0.05263157894736842
+  },
+  {
+   "backend": "pytubefix",
+   "query": "tomorrowland",
+   "seconds": 5.167939966981066,
+   "ok": true,
+   "error": null,
+   "hits": 18,
+   "titled_fraction": 0.0
+  },
+  {
+   "backend": "pytubefix",
+   "query": "daft punk",
+   "seconds": 5.227906054002233,
+   "ok": true,
+   "error": null,
+   "hits": 17,
+   "titled_fraction": 0.0
+  },
+  {
+   "backend": "pytubefix",
+   "query": "vernki",
+   "seconds": 9.899537697987398,
+   "ok": true,
+   "error": null,
+   "hits": 13,
+   "titled_fraction": 0.0
+  },
+  {
+   "backend": "pytubefix",
+   "query": "lofi radio",
+   "seconds": 5.317562597017968,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 0.0
+  },
+  {
+   "backend": "pytubefix",
+   "query": "news live",
+   "seconds": 5.3353861210052855,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 0.0
+  },
+  {
+   "backend": "ytdlp",
+   "query": "rick astley never gonna give you up",
+   "seconds": 1.1209830190055072,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 0.95
+  },
+  {
+   "backend": "ytdlp",
+   "query": "tomorrowland",
+   "seconds": 1.9592545219929889,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 0.9
+  },
+  {
+   "backend": "ytdlp",
+   "query": "daft punk",
+   "seconds": 1.8312920019961894,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 1.0
+  },
+  {
+   "backend": "ytdlp",
+   "query": "vernki",
+   "seconds": 1.2753363199881278,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 0.9
+  },
+  {
+   "backend": "ytdlp",
+   "query": "lofi radio",
+   "seconds": 1.5494851479888894,
+   "ok": true,
+   "error": null,
+   "hits": 11,
+   "titled_fraction": 1.0
+  },
+  {
+   "backend": "ytdlp",
+   "query": "news live",
+   "seconds": 0.7260459430108313,
+   "ok": true,
+   "error": null,
+   "hits": 20,
+   "titled_fraction": 1.0
+  }
+ ],
+ "verdict": {
+  "D1": {
+   "pass": false,
+   "pytubefix_p50": 0.3424536829988938,
+   "ytdlp_p50": 2.333283632993698
+  },
+  "D2": {
+   "pass": true,
+   "ytdlp_p95": 4.791206430003513
+  },
+  "D3": {
+   "pass": true,
+   "pytubefix_p50": 5.317562597017968,
+   "ytdlp_p50": 1.2753363199881278
+  },
+  "D4": {
+   "pass": true,
+   "pytubefix_failures": 14,
+   "ytdlp_failures": 1
+  },
+  "D5": {
+   "pass": true
+  }
+ },
+ "meta": {
+  "date": "2026-09-24 13:59 CEST",
+  "platform": "macOS-15.7.7-x86_64-i386-64bit",
+  "pytubefix": "10.7.3",
+  "yt_dlp": "2026.08.19",
+  "deno": "/usr/local/bin/deno"
+ }
+}
