@@ -32,6 +32,15 @@ class _RedactCdnUrls(logging.Filter):
         redacted = youtube.redact_cdn_urls(msg)
         if redacted != msg:
             record.msg, record.args = redacted, None
+        # Tracebacks are formatted after filters run: pre-render them here
+        # (Formatter reuses record.exc_text) and drop exc_info.
+        if record.exc_info:
+            record.exc_text = youtube.redact_cdn_urls(
+                logging.Formatter().formatException(record.exc_info)
+            )
+            record.exc_info = None
+        if record.stack_info:
+            record.stack_info = youtube.redact_cdn_urls(record.stack_info)
         return True
 
 

@@ -278,3 +278,26 @@ def test_every_log_record_redacts_signed_cdn_urls() -> None:
     out = buf.getvalue()
     assert out.count("<googlevideo-url>") == 2
     assert "SECRET" not in out and "203.0.113.9" not in out
+
+
+def test_log_redaction_covers_exception_tracebacks() -> None:
+    import io
+
+    from app.main import _configure_logging
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        _configure_logging()
+        url = "https://rr1---sn.googlevideo.com/videoplayback?ip=203.0.113.9&sig=SECRET"
+        try:
+            raise RuntimeError(f"failed fetching {url}")
+        except RuntimeError:
+            logging.getLogger("some.lib").exception("fetch failed")
+    finally:
+        root.removeHandler(handler)
+    out = buf.getvalue()
+    assert "Traceback" in out and "<googlevideo-url>" in out
+    assert "SECRET" not in out and "203.0.113.9" not in out

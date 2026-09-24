@@ -37,3 +37,9 @@ def test_encode_message_multibyte_varint() -> None:
 def test_encode_message_rejects_unsupported_types() -> None:
     with pytest.raises(TypeError):
         encode_message({1: 1.5})  # type: ignore[dict-item]
+
+
+def test_encode_message_rejects_negative_ints() -> None:
+    # Arithmetic right shift keeps -1 at -1: without the guard _varint loops forever.
+    with pytest.raises(ValueError):
+        encode_message({1: -1})

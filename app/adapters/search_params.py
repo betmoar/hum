@@ -20,6 +20,10 @@ Message = dict[int, "int | str | Message"]
 
 
 def _varint(n: int) -> bytes:
+    if n < 0:
+        # Hum's filters are all non-negative; a negative int would loop forever
+        # (arithmetic shift keeps -1 at -1) and needs zigzag/10-byte encoding.
+        raise ValueError(f"negative varint not supported: {n}")
     out = bytearray()
     while True:
         byte = n & 0x7F
