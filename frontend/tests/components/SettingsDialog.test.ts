@@ -83,3 +83,29 @@ describe('SettingsDialog', () => {
     dialog.unmount();
   });
 });
+
+describe('SettingsDialog — focus return', () => {
+  it('returns focus to the trigger even though showModal moves focus into the dialog', async () => {
+    const trigger = document.createElement('button');
+    trigger.textContent = 'Settings';
+    document.body.appendChild(trigger);
+    trigger.focus();
+    // Like a real browser: showModal() focuses the first focusable in the dialog.
+    const orig = HTMLDialogElement.prototype.showModal;
+    const spy = vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function (this: HTMLDialogElement) {
+      orig.call(this);
+      this.querySelector<HTMLElement>('button')?.focus();
+    });
+    try {
+      const { rerender } = render(SettingsDialog, { open: true, onclose: () => {} });
+      await flushSync();
+      expect(document.activeElement).not.toBe(trigger);
+      await rerender({ open: false, onclose: () => {} });
+      await flushSync();
+      expect(document.activeElement).toBe(trigger);
+    } finally {
+      spy.mockRestore();
+      trigger.remove();
+    }
+  });
+});

@@ -659,6 +659,21 @@ async def test_playlist_next_start_counts_malformed_rows(
     assert result.next_start == 5
 
 
+async def test_playlist_full_window_is_truncated_despite_low_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YouTube can under-report playlist_count: a full window must still
+    offer the next page, or the remaining items are unreachable."""
+    info = {
+        "title": "Under", "uploader": "C", "playlist_count": 2,
+        "entries": [{"id": f"v{n}", "title": str(n)} for n in range(4)],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert result.truncated is True
+    assert result.next_start == 5
+
+
 async def test_playlist_next_start_none_at_end(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, PLAYLIST_INFO)
     result = await youtube.playlist("PLxyz", start=1, limit=200)

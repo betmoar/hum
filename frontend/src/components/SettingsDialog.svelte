@@ -10,24 +10,21 @@
 
   let dialog = $state<HTMLDialogElement | null>(null);
 
-  // Same open/close-by-prop pattern as ConfirmDialog.
-  $effect(() => {
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
-  });
-
-  // Return focus to whatever triggered the open (nav link, or nothing for a
-  // deep link) once the dialog closes. showModal() also does this natively
-  // in evergreen browsers, but we don't rely on that alone — it doesn't
-  // cover the jsdom fallback path above, and being explicit costs little.
+  // Same open/close-by-prop pattern as ConfirmDialog. The trigger (nav link,
+  // or nothing for a deep link) is captured BEFORE showModal(), which moves
+  // focus into the dialog, and gets focus back on close. showModal() also
+  // restores focus natively in evergreen browsers; this doesn't rely on it.
   let previousFocus: Element | null = null;
   $effect(() => {
-    if (open) {
+    if (!dialog) return;
+    if (open && !dialog.open) {
       previousFocus = document.activeElement;
-      return () => {
-        if (previousFocus instanceof HTMLElement) previousFocus.focus();
-      };
+      dialog.showModal();
+    }
+    if (!open && dialog.open) {
+      dialog.close();
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+      previousFocus = null;
     }
   });
 </script>

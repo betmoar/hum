@@ -50,3 +50,12 @@ describe('bookmarks', () => {
     expect(getBookmark('0')).toBeNull();
   });
 });
+
+describe('bookmarks — corrupt storage', () => {
+  it('saving over malformed entries does not throw and drops them', () => {
+    localStorage.setItem('hum.bookmarks', JSON.stringify({ bad: null, worse: { pos: 'x', at: 1 }, ok: { pos: 100, at: 1 } }));
+    expect(() => saveBookmark('new', 200, 1200, 2)).not.toThrow();
+    const stored = JSON.parse(localStorage.getItem('hum.bookmarks')!);
+    expect(Object.keys(stored).sort()).toEqual(['new', 'ok']);
+  });
+});

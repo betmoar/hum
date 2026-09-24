@@ -800,18 +800,14 @@ def _fetch_playlist(
             thumbnail_url=_best_thumb(entry.get("thumbnails"), max_width=_ROW_THUMB_MAX_W) or "",
         ))
     video_count = _int(info.get("playlist_count"))
-    # Truncation signal: the window [start, start+limit) didn't reach the end
-    # of the playlist. Compared against raw_entries (pre-unavailable-filter)
-    # because video_count also counts private/deleted placeholders — comparing
-    # against the filtered `items` would report truncated=True on a short,
-    # fully-fetched playlist that merely contains a few deleted videos.
-    # When YouTube doesn't report playlist_count, fall back to "the fetch
-    # window came back full" as a heuristic (a playlist could coincidentally
-    # end exactly at the window edge; a harmless false positive).
+    # Truncation signal: the window [start, start+limit) may not have reached
+    # the end. Counted in raw rows (unavailable placeholders included) because
+    # playlist_count counts them too. A full window always counts as
+    # truncated, even when playlist_count says otherwise: YouTube can
+    # under-report it, and a spare empty page beats unreachable items.
     fetched_through = (start - 1) + len(raw_entries)
-    truncated = (
-        video_count > fetched_through if video_count is not None
-        else len(raw_entries) >= limit
+    truncated = len(raw_entries) >= limit or (
+        video_count is not None and video_count > fetched_through
     )
     return PlaylistInfo(
         playlist_id=playlist_id,

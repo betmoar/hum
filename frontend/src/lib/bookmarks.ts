@@ -15,7 +15,15 @@ function load(): Record<string, Entry> {
   try {
     const raw = localStorage.getItem(KEY);
     const v: unknown = raw ? JSON.parse(raw) : {};
-    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, Entry>) : {};
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    // Drop malformed entries: the eviction sort in saveBookmark reads .at.
+    const out: Record<string, Entry> = {};
+    for (const [id, e] of Object.entries(v)) {
+      if (e && typeof e === 'object' && Number.isFinite((e as Entry).pos) && Number.isFinite((e as Entry).at)) {
+        out[id] = { pos: (e as Entry).pos, at: (e as Entry).at };
+      }
+    }
+    return out;
   } catch {
     return {};
   }

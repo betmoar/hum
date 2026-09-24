@@ -31,6 +31,10 @@
 
   // Playlist listings carry no cover of their own; the first track's
   // thumbnail is what YouTube shows as the playlist cover too.
+  // video_count can be under-reported by YouTube (a full window still counts
+  // as truncated), so the remainder may be <= 0: then don't print a number.
+  const remaining = $derived(playlist ? playlist.video_count - playlist.items.length : 0);
+
   const cover = $derived(playlist?.items.find((i) => i.thumbnail_url)?.thumbnail_url ?? '');
 
   // "Load more" pages in the next window starting right after what's loaded.
@@ -156,7 +160,7 @@
     {#if playlist.truncated}
       <div class="load-more">
         <button onclick={loadMore} disabled={loadingMore}>
-          {loadingMore ? 'Loading…' : `Load more (${playlist.video_count - playlist.items.length} remaining)`}
+          {loadingMore ? 'Loading…' : remaining > 0 ? `Load more (${remaining} remaining)` : 'Load more'}
         </button>
       </div>
     {/if}
