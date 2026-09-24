@@ -780,9 +780,13 @@ def _fetch_playlist(
         f"https://www.youtube.com/playlist?list={playlist_id}",
         {**_FLAT_OPTS, "playliststart": start, "playlistend": end},
     )
-    raw_entries = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
+    # Every row, malformed or not, occupies a playlist position: the cursor
+    # math below counts all of them, the loop only maps well-formed dicts.
+    raw_entries = list(info.get("entries") or [])
     items: list[PlaylistItem] = []
     for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
         vid = entry.get("id")
         if not isinstance(vid, str) or not vid:
             continue

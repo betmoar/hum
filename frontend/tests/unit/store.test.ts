@@ -761,6 +761,19 @@ describe('review fixes — store', () => {
     mod.playerControls.current = null;
   });
 
+  it('previous restart resets the stored position (reload must not resume the old spot)', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    mod.playerControls.current = { getPosition: () => 200, seekTo } as any;
+    s.playNow({ ...t('a'), durationSeconds: 1200 });
+    s.setPosition(200);
+    s.previous();
+    expect(seekTo).toHaveBeenCalledWith(0);
+    expect(s.player.positionSeconds).toBe(0);
+    mod.playerControls.current = null;
+  });
+
   it('previous on a live track goes to history regardless of position', async () => {
     const mod = await import('../../src/lib/store.svelte');
     const s = await freshStore();

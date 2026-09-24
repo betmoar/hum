@@ -300,7 +300,12 @@ class AppStore {
     const seekable = isSeekable(cur);
     const pos = playerControls.current?.getPosition?.() ?? 0;
     if (this.history.length === 0 || (seekable && pos > PREVIOUS_RESTART_THRESHOLD_S)) {
-      if (seekable) playerControls.current?.seekTo?.(0);
+      if (seekable) {
+        playerControls.current?.seekTo?.(0);
+        // Persist the restart now: a reload before the next timeupdate would
+        // otherwise resume from the old position.
+        this.player.positionSeconds = 0;
+      }
       return;
     }
     const prior = this.history[this.history.length - 1];

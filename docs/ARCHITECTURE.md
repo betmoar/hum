@@ -156,7 +156,7 @@ Persistence (debounced 200 ms to localStorage):
 | `hum.queue`, `hum.history` | `Track[]` through `stripSignedUrls()` |
 | `hum.current` | `{ track, pos }` — the playing track (stripped) and its last known position |
 | `hum.bookmarks` | `{ [videoId]: { pos, at } }` — resume points for VOD ≥ 10 min (`lib/bookmarks.ts`) |
-| `hum.bearer`, `hum.defaultQuality`, `hum.musicOnly`, `hum.normalize` | settings |
+| `hum.bearer`, `hum.defaultQuality`, `hum.musicOnly` | settings |
 
 `stripSignedUrls()` is the single place signed URLs (`audioUrl`, `hlsUrl`,
 `liveStreamUrl`) and `_formats` are removed, on write and on rehydrate. A track

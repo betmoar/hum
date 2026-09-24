@@ -645,6 +645,20 @@ async def test_playlist_next_start_counts_raw_positions(
     assert result.next_start == 5
 
 
+async def test_playlist_next_start_counts_malformed_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A None / non-dict placeholder still occupies a playlist position."""
+    info = {
+        "title": "Broken", "uploader": "C", "playlist_count": 10,
+        "entries": [{"id": "v1", "title": "One"}, None, "junk", {"id": "v4", "title": "Four"}],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert [i.video_id for i in result.items] == ["v1", "v4"]
+    assert result.next_start == 5
+
+
 async def test_playlist_next_start_none_at_end(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, PLAYLIST_INFO)
     result = await youtube.playlist("PLxyz", start=1, limit=200)
