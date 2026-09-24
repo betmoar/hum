@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import shutil
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -167,9 +168,27 @@ _VIDEO_MIME = {"mp4": "video/mp4", "webm": "video/webm"}
 
 
 def _make_ydl(opts: dict[str, Any]) -> Any:
-    """Factory seam for tests. A YoutubeDL instance is not thread-safe, so
-    every call builds its own (these run in asyncio.to_thread workers)."""
+    """Factory seam for tests. A YoutubeDL instance is not thread-safe: never
+    share one across the asyncio.to_thread workers (see _video_ydl)."""
     return yt_dlp.YoutubeDL(opts)
+
+
+# One reusable YoutubeDL per worker thread for single-video extractions. Its
+# extractor keeps the parsed player JS and solved challenges in memory, which
+# a fresh instance would download and solve again (#18: ~20% of a cold
+# lookup). Thread-local, so no instance is ever used by two threads at once.
+# Flat listings (search/channel/playlist) never load the player, so they keep
+# building a fresh instance per call with their own per-call options.
+_tls = threading.local()
+
+
+def _video_ydl() -> Any:
+    # Rebuilt when _make_ydl changes, so a test's monkeypatched seam is never
+    # bypassed by an instance an earlier test left on this thread.
+    if getattr(_tls, "factory", None) is not _make_ydl:
+        _tls.ydl = _make_ydl(dict(_BASE_OPTS))
+        _tls.factory = _make_ydl
+    return _tls.ydl
 
 
 def _map_error(e: BaseException) -> YouTubeError:
@@ -195,8 +214,13 @@ def _map_error(e: BaseException) -> YouTubeError:
 
 def _extract(url: str, extra: dict[str, Any]) -> dict[str, Any]:
     try:
-        with _make_ydl({**_BASE_OPTS, **extra}) as ydl:
-            info = ydl.extract_info(url, download=False)
+        if extra:
+            with _make_ydl({**_BASE_OPTS, **extra}) as ydl:
+                info = ydl.extract_info(url, download=False)
+        else:
+            # Not closed after the call: closing would also drop its
+            # connection pool, and the instance lives on for the next video.
+            info = _video_ydl().extract_info(url, download=False)
     except YouTubeError:
         raise
     except Exception as e:  # DownloadError/ExtractorError and anything else
