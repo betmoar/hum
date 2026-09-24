@@ -26,6 +26,5 @@ _(None open — cleared in the 2026-07 backlog sweep.)_
 
 ## P3
 
-_(None open — the `aiohttp` / `nodejs-wheel-binaries` transitive-dep note was removed:
-both came in via `pytubefix`, which is gone. yt-dlp's runtime dependency is the deno
-binary, shipped in the Docker image and required on PATH for local dev.)_
+- **Tune the reasoned-not-measured constants** in `docs/ARCHITECTURE.md` §
+  "Tuning constants" against real use before defending them.

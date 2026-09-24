@@ -141,14 +141,36 @@ frontend/src/
 
 ```typescript
 class AppStore {
-  settings = $state<{ bearerToken: string | null }>(...);
-  queue = $state<Track[]>(...);
-  player = $state<{ current: Track | null; isPlaying: boolean; positionSeconds: number }>(...);
-  // methods: setToken, invalidateToken, enqueue, playNow, next, remove, reorder, clear
+  settings = $state<{ bearerToken; defaultQuality; musicOnly }>(...);
+  queue = $state<Track[]>(...);    // upcoming tracks
+  history = $state<Track[]>(...);  // played tracks, most recent last (cap 50)
+  player = $state<{ current: Track | null; isPlaying: boolean; positionSeconds: number; ... }>(...);
+  // methods: setToken, enqueue, playNow, next, previous, startPositionFor, setPosition, ...
 }
 ```
 
-Persistence: `queue` + `bearerToken` debounced (200ms) to localStorage. `positionSeconds` deliberately not persisted — restart resumes from 0.
+Persistence (debounced 200 ms to localStorage):
+
+| Key | Contents |
+|---|---|
+| `hum.queue`, `hum.history` | `Track[]` through `stripSignedUrls()` |
+| `hum.current` | `{ track, pos }` — the playing track (stripped) and its last known position |
+| `hum.bookmarks` | `{ [videoId]: { pos, at } }` — resume points for VOD ≥ 10 min (`lib/bookmarks.ts`) |
+| `hum.bearer`, `hum.defaultQuality`, `hum.musicOnly`, `hum.normalize` | settings |
+
+`stripSignedUrls()` is the single place signed URLs (`audioUrl`, `hlsUrl`,
+`liveStreamUrl`) and `_formats` are removed, on write and on rehydrate. A track
+restored from `hum.current` comes back **paused** (`isPlaying: false`, which the
+`<audio autoplay>` binding reads) and seeks to its saved position once its fresh
+URL loads. `store.startPositionFor(t)` answers "where does this track start":
+restored position (once), else a bookmark for long VOD, else 0.
+
+`previous()` goes back to the last history entry when the current track has
+played ≤ 3 s, otherwise restarts it; the track being left goes to the front of
+the queue. `queue` keeps meaning "upcoming" so its consumers didn't change.
+
+Per-kind behaviour (VOD vs live) lives in `lib/contentKind.ts`; see CLAUDE.md
+landmines.
 
 ### Player lifecycle
 
@@ -158,15 +180,45 @@ ResultItem click → router.navigate('/video/:id')
                  → pickAudio() picks best format
                  → store.playNow(track) OR store.enqueue(track)
                  → Player's $effect updates <audio src>, autoplay
-                 → on 'ended': store.next()
-                 → on 'error' (signed URL expired): refetch + restore position
+                 → on 'loadedmetadata': seek to store.startPositionFor(track)
+                 → every 5 s / on pause / pagehide: store.setPosition + bookmark
+                 → on 'ended': clear bookmark, store.next()
+                 → on 'error': probe /health → unreachable toast, OR
+                   codec swap → refetch + restore position
 ```
+
+Media Session: metadata + play/pause/next/previous on every track;
+`seekto`/`seekbackward`/`seekforward` and `setPositionState` for VOD only
+(cleared for live) so lock-screen and headset controls get a scrubbable bar.
 
 URL-expiry recovery is tracked by a `Set<videoId>` so a persistently-broken track doesn't infinite-retry across recovery attempts.
 
 ### Routing
 
 Hand-rolled hash router (~25 LOC). State is `$state(read())` updated on `hashchange`. `App.svelte` renders `{@const Page = router.match.component}` and passes `router.match.params` as props.
+
+## Tuning constants (reasoned, not measured)
+
+Every value below was argued for, not measured against real listening or
+network conditions. Collected here so that stays visible — tune them against
+observed behaviour, and don't defend one just because it shipped.
+
+| Constant | Value | Location | What it decides |
+|---|---|---|---|
+| `_CACHE_MAX_TTL` | 3600 s | `app/adapters/youtube.py` | Upper bound on trusting YouTube's `expire=` for a cached stream URL |
+| `_MASTER_CACHE_TTL_S` | 2 s | `app/api/live.py` | How long a live master manifest is reused |
+| `_TARGET_SEGMENT_SECONDS` | 60 s | `app/api/hls.py` | Segment coalescing target for VOD HLS wrapping |
+| `upstream_connect_timeout` / `upstream_read_timeout` | 10 s / 30 s | `app/config.py` | Per-phase upstream timeouts (no total timeout, by design) |
+| `liveSyncDuration` / `liveMaxLatencyDuration` | 15 s / 30 s | `Player.svelte` (hls.js) | Live start distance from edge / tolerated lag |
+| hls.js load policies | TTFB 8 s; load 20 s (manifest) / 30 s (fragment); 4 retries | `Player.svelte` | When a live fetch counts as failed |
+| `PERSIST_DEBOUNCE_MS` | 200 ms | `store.svelte.ts` | localStorage write coalescing |
+| `HISTORY_MAX` | 50 | `store.svelte.ts` | How far back "previous" can go |
+| `PREVIOUS_RESTART_THRESHOLD_S` | 3 s | `store.svelte.ts` | Previous = restart vs go back |
+| `BOOKMARK_MIN_DURATION_S` | 600 s | `lib/bookmarks.ts` | Which videos get a resume point |
+| `BOOKMARK_END_MARGIN_S` | 30 s | `lib/bookmarks.ts` | How close to the end counts as finished |
+| `BOOKMARK_MAX_ENTRIES` | 200 | `lib/bookmarks.ts` | Resume points kept (oldest evicted) |
+| `POSITION_SAVE_INTERVAL_MS` | 5000 ms | `Player.svelte` | Worst-case position loss on a crash |
+| `SEEK_STEP_S` | 10 s | `Player.svelte` | Lock-screen seek step when the OS gives none |
 
 ## Dev / build / deploy
 
