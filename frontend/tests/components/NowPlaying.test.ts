@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import NowPlaying from '../../src/components/NowPlaying.svelte';
@@ -61,5 +61,18 @@ describe('NowPlaying — AirPlay button gating', () => {
     store.player.airplayCapable = true;
     await tick();
     expect(container.querySelector('[aria-label="AirPlay"]')).not.toBeNull();
+  });
+});
+
+describe('NowPlaying — previous', () => {
+  it('prev button is labelled Previous track and calls store.previous', async () => {
+    const spy = vi.spyOn(store, 'previous').mockImplementation(() => {});
+    store.playNow(sampleTrack('p', '/proxy/audio/p?x'));
+    store.expandPlayer();
+    const { getByLabelText } = render(NowPlaying);
+    await tick();
+    getByLabelText('Previous track').click();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

@@ -4,6 +4,7 @@ import { tick } from 'svelte';
 import Player from '../../src/components/Player.svelte';
 import { store, playerControls } from '../../src/lib/store.svelte';
 import type { Track, AudioFormat } from '../../src/lib/types';
+import { api, ApiError } from '../../src/lib/api';
 
 const sampleTrack = (id: string, audioUrl: string): Track => ({
   videoId: id,
@@ -16,7 +17,13 @@ const sampleTrack = (id: string, audioUrl: string): Track => ({
 });
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  // handleError probes /health first; default to "Hum is up" so the existing
+  // recovery-ladder tests exercise the ladder, not the unreachable path.
+  vi.spyOn(api, 'health').mockResolvedValue();
   store.clear();
+  store.history = [];
+  store.dismissToast();
   store.player.current = null;
   store.player.isPlaying = false;
   store.player.positionSeconds = 0;
@@ -205,7 +212,7 @@ describe('Player — live tracks', () => {
     expect(container.querySelector('video')).toBeNull();
   });
 
-  it('scrubber and restart button are absent when live', async () => {
+  it('scrubber and previous button are absent when live', async () => {
     store.player.current = {
       videoId: 'abc12345678', title: 'L', author: 'a', durationSeconds: 0,
       thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
@@ -214,7 +221,7 @@ describe('Player — live tracks', () => {
     const { container } = render(Player);
     await tick();
     expect(container.querySelector('input[type="range"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Restart track"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Previous track"]')).toBeNull();
   });
 
   it('LIVE pill renders when track is live', async () => {
@@ -372,5 +379,177 @@ describe('Player — live stub tracks', () => {
     await vi.waitFor(() => expect(store.player.current?.isLive).toBe(true));
     expect(store.player.current?.liveStreamUrl).toContain('/api/live/live1/manifest.m3u8');
     spy.mockRestore();
+  });
+});
+
+describe('Player — resume, previous, media session, unreachable', () => {
+  it('does not autoplay a restored (isPlaying=false) track', async () => {
+    store.player.current = sampleTrack('r', '/proxy/audio/r?x');
+    store.player.isPlaying = false;
+    const { container } = render(Player);
+    await tick();
+    expect((container.querySelector('audio') as HTMLAudioElement).autoplay).toBe(false);
+  });
+
+  it('autoplays a track started with playNow', async () => {
+    store.playNow(sampleTrack('p', '/proxy/audio/p?x'));
+    const { container } = render(Player);
+    await tick();
+    expect((container.querySelector('audio') as HTMLAudioElement).autoplay).toBe(true);
+  });
+
+  it('seeks to startPositionFor once metadata loads', async () => {
+    vi.spyOn(store, 'startPositionFor').mockReturnValue(123);
+    store.playNow(sampleTrack('s', '/proxy/audio/s?x'));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'currentTime', { value: 0, writable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    expect(audio.currentTime).toBe(123);
+  });
+
+  it('a same-video object swap (quality switch) does not re-arm the start seek', async () => {
+    const spy = vi.spyOn(store, 'startPositionFor').mockReturnValue(0);
+    store.playNow(sampleTrack('w', '/proxy/audio/w?itag=140'));
+    render(Player);
+    await tick();
+    store.player.current = { ...store.player.current!, audioUrl: '/proxy/audio/w?itag=251', itag: 251 };
+    await tick();
+    store.setPosition(30);
+    await tick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('pause records position in the store', async () => {
+    store.playNow(sampleTrack('q', '/proxy/audio/q?x'));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    Object.defineProperty(audio, 'currentTime', { value: 55, writable: true });
+    audio.dispatchEvent(new Event('pause'));
+    expect(store.player.positionSeconds).toBe(55);
+    expect(store.player.isPlaying).toBe(false);
+  });
+
+  it('pause of a long vod writes a bookmark', async () => {
+    store.playNow({ ...sampleTrack('long', '/proxy/audio/long?x'), durationSeconds: 1200 });
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'currentTime', { value: 300, writable: true });
+    Object.defineProperty(audio, 'duration', { value: 1200, configurable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    audio.dispatchEvent(new Event('pause'));
+    expect(JSON.parse(localStorage.getItem('hum.bookmarks')!).long.pos).toBe(300);
+  });
+
+  it('pause before the new source loads does not save (track-switch guard)', async () => {
+    store.playNow(sampleTrack('g', '/proxy/audio/g?x'));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    audio.dispatchEvent(new Event('emptied'));
+    Object.defineProperty(audio, 'currentTime', { value: 99, writable: true });
+    audio.dispatchEvent(new Event('pause'));
+    expect(store.player.positionSeconds).toBe(0);
+  });
+
+  it('ended clears the bookmark and advances', async () => {
+    localStorage.setItem('hum.bookmarks', JSON.stringify({ e: { pos: 300, at: 1 } }));
+    const next = vi.spyOn(store, 'next');
+    store.playNow({ ...sampleTrack('e', '/proxy/audio/e?x'), durationSeconds: 1200 });
+    const { container } = render(Player);
+    await tick();
+    container.querySelector('audio')!.dispatchEvent(new Event('ended'));
+    expect(JSON.parse(localStorage.getItem('hum.bookmarks')!).e).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('previous button calls store.previous', async () => {
+    const spy = vi.spyOn(store, 'previous');
+    store.playNow(sampleTrack('p', '/proxy/audio/p?x'));
+    const { getByLabelText } = render(Player);
+    await tick();
+    getByLabelText('Previous track').click();
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('playerControls.seekTo sets currentTime', async () => {
+    store.playNow(sampleTrack('k', '/proxy/audio/k?x'));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'currentTime', { value: 50, writable: true });
+    playerControls.current!.seekTo!(0);
+    expect(audio.currentTime).toBe(0);
+  });
+
+  it('registers seek handlers and position state for vod', async () => {
+    const handlers: Record<string, any> = {};
+    const setPositionState = vi.fn();
+    (navigator as any).mediaSession = {
+      metadata: null,
+      setActionHandler: (k: string, f: any) => { handlers[k] = f; },
+      setPositionState,
+    };
+    (globalThis as any).MediaMetadata = class { constructor(public o: any) {} };
+    try {
+      store.playNow(sampleTrack('m', '/proxy/audio/m?x'));
+      const { container } = render(Player);
+      await tick();
+      expect(typeof handlers.seekto).toBe('function');
+      expect(typeof handlers.seekbackward).toBe('function');
+      expect(typeof handlers.seekforward).toBe('function');
+      const audio = container.querySelector('audio') as HTMLAudioElement;
+      Object.defineProperty(audio, 'duration', { value: 200, configurable: true });
+      Object.defineProperty(audio, 'currentTime', { value: 10, writable: true });
+      audio.dispatchEvent(new Event('loadedmetadata'));
+      expect(setPositionState).toHaveBeenCalledWith(expect.objectContaining({ duration: 200, position: 10 }));
+      handlers.seekto({ seekTime: 42 });
+      expect(audio.currentTime).toBe(42);
+      handlers.seekbackward({});
+      expect(audio.currentTime).toBe(32);
+    } finally {
+      delete (navigator as any).mediaSession;
+    }
+  });
+
+  it('clears seek handlers for live', async () => {
+    const handlers: Record<string, any> = {};
+    (navigator as any).mediaSession = {
+      metadata: null,
+      setActionHandler: (k: string, f: any) => { handlers[k] = f; },
+      setPositionState: vi.fn(),
+    };
+    (globalThis as any).MediaMetadata = class { constructor(public o: any) {} };
+    try {
+      store.player.current = {
+        videoId: 'live1', title: 'L', author: 'a', durationSeconds: 0,
+        thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
+        liveStreamUrl: '/api/live/live1/manifest.m3u8?exp=1&sig=x',
+      };
+      render(Player);
+      await tick();
+      expect(handlers.seekto).toBeNull();
+    } finally {
+      delete (navigator as any).mediaSession;
+    }
+  });
+
+  it('unreachable server: shows Hum toast and does not refetch', async () => {
+    vi.spyOn(api, 'health').mockRejectedValue(new ApiError(0, 'x'));
+    const video = vi.spyOn(api, 'video');
+    store.playNow(sampleTrack('u', '/proxy/audio/u?x'));
+    const { container } = render(Player);
+    await tick();
+    container.querySelector('audio')!.dispatchEvent(new Event('error'));
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    expect(store.toast?.message).toBe("Can't reach Hum server.");
+    expect(store.toast?.action?.label).toBe('Retry');
+    expect(video).not.toHaveBeenCalled();
   });
 });

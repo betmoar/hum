@@ -55,11 +55,6 @@
     playerControls.current?.toggle();
   }
 
-  function restartTrack() {
-    // Restart button is gated by isSeekable(t) in the template, so only audio.
-    const audio = document.querySelector('audio') as HTMLAudioElement | null;
-    if (audio) audio.currentTime = 0;
-  }
 
   function openQueue() {
     // Collapse the expanded view, then route to /queue. Two steps so the
@@ -219,7 +214,7 @@
       </button>
 
       {#if isSeekable(t)}
-        <button class="ctrl ctrl-prev" onclick={restartTrack} aria-label="Restart track">
+        <button class="ctrl ctrl-prev" onclick={() => store.previous()} aria-label="Previous track">
           <Icon name="skip-back" size={30} />
         </button>
       {/if}

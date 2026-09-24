@@ -1,6 +1,6 @@
 import type { Track, Quality, AudioFormat, VideoDetails } from './types';
 import { migrateLegacyKeys } from './migrateLegacy';
-import { api } from './api';
+import { api, isUnreachable } from './api';
 import { detectAudioEnv } from './browserEnv';
 import { pickForTier } from './pickAudio';
 import { getBookmark, BOOKMARK_MIN_DURATION_S } from './bookmarks';
@@ -62,6 +62,7 @@ const KEY_MUSIC_ONLY = 'hum.musicOnly';
 const KEY_CURRENT = 'hum.current';
 const KEY_HISTORY = 'hum.history';
 export const HISTORY_MAX = 50;
+export const UNREACHABLE_MESSAGE = "Can't reach Hum server.";
 // "Previous" restarts the current track once it has played this long;
 // before that it goes back to the prior track (common player convention).
 export const PREVIOUS_RESTART_THRESHOLD_S = 3;
@@ -344,6 +345,19 @@ class AppStore {
     }
   }
 
+  /**
+   * The request never reached Hum (see api.isUnreachable). Distinct copy from
+   * the YouTube-side "Stream failed" so the user knows which box to check.
+   * Sticky when a retry is offered.
+   */
+  notifyUnreachable(retry?: () => void): void {
+    if (retry) {
+      this.notify(UNREACHABLE_MESSAGE, 'error', { label: 'Retry', onclick: () => { this.dismissToast(); retry(); } }, 0);
+    } else {
+      this.notify(UNREACHABLE_MESSAGE, 'error');
+    }
+  }
+
   dismissToast(): void {
     this.toast = null;
     if (this.#toastTimer) clearTimeout(this.#toastTimer);
@@ -412,8 +426,9 @@ class AppStore {
       const fmt = pickForTier(d.audio_formats, tier, detectAudioEnv());
       if (!fmt) { this.notify('No playable format found.', 'error'); return null; }
       return this.#buildTrack(d, fmt, tier);
-    } catch {
-      this.notify('Could not load this track.', 'error');
+    } catch (e) {
+      if (isUnreachable(e)) this.notifyUnreachable();
+      else this.notify('Could not load this track.', 'error');
       return null;
     }
   }
