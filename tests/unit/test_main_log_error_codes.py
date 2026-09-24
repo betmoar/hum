@@ -316,7 +316,7 @@ def test_redaction_filter_never_raises_into_the_caller() -> None:
 
 
 def test_redaction_covers_uvicorn_loggers() -> None:
-    from app.main import _RedactCdnUrls, _configure_logging
+    from app.main import _configure_logging, _RedactCdnUrls
 
     _configure_logging()
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
