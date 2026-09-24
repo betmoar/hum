@@ -299,6 +299,14 @@
     if (!t || t.isLive || pickVodSrc(t)) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
+      // A stub queued from a playlist listing can turn out to be live: switch
+      // it to a live track so the hls.js live-mount effect takes over.
+      if (fresh.is_live) {
+        if (fresh.live_stream_url) {
+          store.player.current = { ...t, isLive: true, liveStreamUrl: fresh.live_stream_url, durationSeconds: 0 };
+        }
+        return;
+      }
       // Stub tracks (queued from a playlist listing) have no itag yet: pick by
       // the user's quality tier, not formats[0] (yt-dlp lists lowest first).
       const same =

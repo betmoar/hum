@@ -774,3 +774,16 @@ def test_yt_dlp_failure_log_redacts_signed_urls(
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "unable to download" in text  # diagnostic kept
     assert "SECRET" not in text and "1.2.3.4" not in text
+
+
+def test_ydl_logger_redacts_signed_urls_at_every_level(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    lg = youtube._BASE_OPTS["logger"]
+    url = "https://rr1---sn.googlevideo.com/videoplayback?ip=1.2.3.4&sig=SECRET"
+    with caplog.at_level(logging.DEBUG, logger="hum.youtube"):
+        for method in ("debug", "info", "warning", "error"):
+            getattr(lg, method)(f"{method} {url}")
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert text.count("<googlevideo-url>") == 4
+    assert "SECRET" not in text and "1.2.3.4" not in text

@@ -324,3 +324,19 @@ describe('Player — stub tracks (playlist enqueue)', () => {
     spy.mockRestore();
   });
 });
+
+describe('Player — live stub tracks', () => {
+  it('turns a URL-less stub into a live track when the video is live', async () => {
+    const { api } = await import('../../src/lib/api');
+    const spy = vi.spyOn(api, 'video').mockResolvedValue({
+      video_id: 'live1', is_live: true, audio_formats: [], title: 'Radio', author: 'A',
+      duration_seconds: 0, thumbnail_url: '', live_stream_url: '/api/live/live1/manifest.m3u8?exp=1&sig=x',
+    } as never);
+    store.enqueueStubs([{ videoId: 'live1', title: 'Radio', author: 'A', durationSeconds: 0, thumbnailUrl: '' }]);
+    store.playNow(store.queue[0]);
+    render(Player);
+    await vi.waitFor(() => expect(store.player.current?.isLive).toBe(true));
+    expect(store.player.current?.liveStreamUrl).toContain('/api/live/live1/manifest.m3u8');
+    spy.mockRestore();
+  });
+});

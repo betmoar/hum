@@ -98,16 +98,25 @@ class LiveStreamInfo:
 # ---- yt-dlp plumbing ------------------------------------------------------
 
 
+_CDN_URL_RE = re.compile(r"https?://[^\s'\"]*googlevideo\.com[^\s'\"]*")
+
+
+def _redact_cdn_urls(text: str) -> str:
+    return _CDN_URL_RE.sub("<googlevideo-url>", text)
+
+
 class _YdlLogger:
     """Route yt-dlp's own output into Hum's logging. Without a logger it
     prints ERROR lines to stderr even with quiet=True; the actual failure is
     already surfaced as a mapped YouTubeError, so these are debug detail."""
 
+    # Every level redacts: yt-dlp diagnostics can contain signed googlevideo URLs.
+
     def debug(self, msg: str) -> None:
-        logger.debug("yt-dlp: %s", msg)
+        logger.debug("yt-dlp: %s", _redact_cdn_urls(msg))
 
     def info(self, msg: str) -> None:
-        logger.debug("yt-dlp: %s", msg)
+        logger.debug("yt-dlp: %s", _redact_cdn_urls(msg))
 
     def warning(self, msg: str) -> None:
         # Hum never downloads or merges formats, so a missing ffmpeg is
@@ -115,10 +124,10 @@ class _YdlLogger:
         if "ffmpeg not found" in msg:
             logger.debug("yt-dlp: %s", msg)
             return
-        logger.warning("yt-dlp: %s", msg)
+        logger.warning("yt-dlp: %s", _redact_cdn_urls(msg))
 
     def error(self, msg: str) -> None:
-        logger.debug("yt-dlp error (raised as YouTubeError): %s", msg)
+        logger.debug("yt-dlp error (raised as YouTubeError): %s", _redact_cdn_urls(msg))
 
 
 _BASE_OPTS: dict[str, Any] = {
@@ -154,13 +163,6 @@ def _make_ydl(opts: dict[str, Any]) -> Any:
     """Factory seam for tests. A YoutubeDL instance is not thread-safe, so
     every call builds its own (these run in asyncio.to_thread workers)."""
     return yt_dlp.YoutubeDL(opts)
-
-
-_CDN_URL_RE = re.compile(r"https?://[^\s'\"]*googlevideo\.com[^\s'\"]*")
-
-
-def _redact_cdn_urls(text: str) -> str:
-    return _CDN_URL_RE.sub("<googlevideo-url>", text)
 
 
 def _map_error(e: BaseException) -> YouTubeError:
