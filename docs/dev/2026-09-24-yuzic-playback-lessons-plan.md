@@ -21,8 +21,8 @@ clean, vitest **187 passed (21 files)**, vite build ok. No failing tests.
 
 - Signed URLs (`audioUrl`, `hlsUrl`, `liveStreamUrl`) and `_formats` are never
   written to localStorage. All stripping goes through `stripSignedUrls()`.
-- localStorage keys: `hum.current`, `hum.history`, `hum.bookmarks`,
-  `hum.normalize` (new); existing keys unchanged.
+- localStorage keys: `hum.current`, `hum.history`, `hum.bookmarks` (new);
+  existing keys unchanged. (`hum.normalize` was planned for R7, dropped.)
 - Constants: `BOOKMARK_MIN_DURATION_S = 600`, `BOOKMARK_END_MARGIN_S = 30`,
   `BOOKMARK_MAX_ENTRIES = 200`, `POSITION_SAVE_INTERVAL_MS = 5000`,
   `HISTORY_MAX = 50`, `PREVIOUS_RESTART_THRESHOLD_S = 3`,
