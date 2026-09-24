@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
     "blake3>=1.0",
+    "yt-dlp>=2026.8.19",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +57,8 @@ select = ["E", "F", "I", "B", "UP", "N", "ANN", "SIM", "C4"]
 [tool.ruff.lint.per-file-ignores]
 # pytubefix is untyped; the adapter intentionally exposes Any across its boundary.
 "app/adapters/youtube.py" = ["ANN401"]
+# yt-dlp's info dicts are untyped JSON-shaped data; same boundary rationale.
+"app/adapters/youtube_ytdlp.py" = ["ANN401"]
 # Tests: annotation rules are noise on fixtures/monkeypatch params; long lines
 # are usually literal fixture URLs/manifests. Everything else applies.
 "tests/**" = ["ANN", "E501"]
@@ -72,7 +75,7 @@ no_implicit_optional = true
 show_error_codes = true
 
 [[tool.mypy.overrides]]
-module = ["pytubefix.*"]
+module = ["pytubefix.*", "yt_dlp.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

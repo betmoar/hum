@@ -52,6 +52,19 @@ def test_invariant_1_pytubefix_only_in_the_adapter() -> None:
     )
 
 
+def test_invariant_1b_yt_dlp_only_in_its_adapter() -> None:
+    # Spike-scoped companion to invariant 1 (spike/ytdlp-backend): the yt-dlp
+    # backend is confined to one file for the same one-file-fix reason.
+    offenders = [
+        str(p.relative_to(APP_DIR))
+        for p in _py_files()
+        if "yt_dlp" in _imports_of(p) and p.name != "youtube_ytdlp.py"
+    ]
+    assert not offenders, (
+        f"yt_dlp imported outside app/adapters/youtube_ytdlp.py: {offenders}."
+    )
+
+
 def test_invariant_2_single_httpx_client_construction() -> None:
     offenders: list[str] = []
     for p in _py_files():
