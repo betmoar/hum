@@ -254,3 +254,27 @@ def test_httpx_request_lines_are_not_logged_at_info() -> None:
         assert httpx_logger.level >= logging.WARNING
     finally:
         httpx_logger.setLevel(saved)
+
+
+def test_every_log_record_redacts_signed_cdn_urls() -> None:
+    """One chokepoint instead of per-call-site redaction: any logger (httpx,
+    uvicorn, yt-dlp, ours) reaching the root handlers gets googlevideo URLs
+    redacted, at every level."""
+    import io
+
+    from app.main import _configure_logging
+
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        _configure_logging()
+        url = "https://rr1---sn.googlevideo.com/videoplayback?ip=203.0.113.9&sig=SECRET"
+        logging.getLogger("httpx").warning("request to %s failed", url)
+        logging.getLogger("some.lib").error("boom %r", ValueError(url))
+    finally:
+        root.removeHandler(handler)
+    out = buf.getvalue()
+    assert out.count("<googlevideo-url>") == 2
+    assert "SECRET" not in out and "203.0.113.9" not in out

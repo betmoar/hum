@@ -23,6 +23,18 @@ from app.proxy import video as proxy_video
 # ----- Logging --------------------------------------------------------------
 
 
+class _RedactCdnUrls(logging.Filter):
+    """Backstop for invariant 3 in logs: every record reaching a root handler
+    has signed googlevideo URLs redacted, whichever library logged it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        redacted = youtube.redact_cdn_urls(msg)
+        if redacted != msg:
+            record.msg, record.args = redacted, None
+        return True
+
+
 def _configure_logging() -> None:
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -34,6 +46,9 @@ def _configure_logging() -> None:
     # httpx logs every request URL at INFO; for media those are signed
     # googlevideo URLs with the server's IP. hum.access already logs requests.
     logging.getLogger("httpx").setLevel(max(level, logging.WARNING))
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _RedactCdnUrls) for f in handler.filters):
+            handler.addFilter(_RedactCdnUrls())
 
 
 # ----- App ------------------------------------------------------------------

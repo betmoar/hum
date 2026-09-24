@@ -101,7 +101,9 @@ class LiveStreamInfo:
 _CDN_URL_RE = re.compile(r"https?://[^\s'\"]*googlevideo\.com[^\s'\"]*")
 
 
-def _redact_cdn_urls(text: str) -> str:
+def redact_cdn_urls(text: str) -> str:
+    """Replace signed googlevideo URLs (they carry the server IP and sig).
+    Used here and by app.main's root log filter."""
     return _CDN_URL_RE.sub("<googlevideo-url>", text)
 
 
@@ -113,10 +115,10 @@ class _YdlLogger:
     # Every level redacts: yt-dlp diagnostics can contain signed googlevideo URLs.
 
     def debug(self, msg: str) -> None:
-        logger.debug("yt-dlp: %s", _redact_cdn_urls(msg))
+        logger.debug("yt-dlp: %s", redact_cdn_urls(msg))
 
     def info(self, msg: str) -> None:
-        logger.debug("yt-dlp: %s", _redact_cdn_urls(msg))
+        logger.debug("yt-dlp: %s", redact_cdn_urls(msg))
 
     def warning(self, msg: str) -> None:
         # Hum never downloads or merges formats, so a missing ffmpeg is
@@ -124,10 +126,10 @@ class _YdlLogger:
         if "ffmpeg not found" in msg:
             logger.debug("yt-dlp: %s", msg)
             return
-        logger.warning("yt-dlp: %s", _redact_cdn_urls(msg))
+        logger.warning("yt-dlp: %s", redact_cdn_urls(msg))
 
     def error(self, msg: str) -> None:
-        logger.debug("yt-dlp error (raised as YouTubeError): %s", _redact_cdn_urls(msg))
+        logger.debug("yt-dlp error (raised as YouTubeError): %s", redact_cdn_urls(msg))
 
 
 _BASE_OPTS: dict[str, Any] = {
@@ -179,7 +181,7 @@ def _map_error(e: BaseException) -> YouTubeError:
     msg = str(e)
     low = msg.lower()
     # Signed googlevideo URLs are redacted even from the server log.
-    logger.info("yt-dlp failure (%s): %s", type(e).__name__, _redact_cdn_urls(msg))
+    logger.info("yt-dlp failure (%s): %s", type(e).__name__, redact_cdn_urls(msg))
     if any(m in low for m in _BLOCKED_MARKERS):
         return YouTubeError(503, "YOUTUBE_BLOCKED", "YouTube is blocking requests")
     if any(m in low for m in _UNAVAILABLE_MARKERS):
