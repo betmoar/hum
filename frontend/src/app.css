@@ -279,7 +279,12 @@ html, body {
   height: 100%;
   background: var(--bg-base);
   color: var(--ink);
-  overflow-x: hidden;
+  /* clip, not hidden: overflow-x:hidden on html+body makes <body> its own
+     scroll container, so its scrollbar sits inside the viewport and the
+     fixed player bar (right: var(--s-4)) runs underneath it. clip cuts
+     horizontal overflow without creating a scroll container — the window
+     scrolls, and fixed elements stay clear of its scrollbar. */
+  overflow-x: clip;
 }
 
 /* The body itself is the canvas. The artwork-tinted layer is a
