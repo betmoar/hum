@@ -99,6 +99,9 @@ constants, and (if YouTube supplies the data) attenuate loud tracks.
   memory.
 
 ### R7 — Loudness attenuation (data-dependent)
+
+> **Dropped (2026-09-24):** not shipped. 0.2.0 replaced pytubefix with yt-dlp, which does not expose `loudnessDb`. Kept here as a record.
+
 - R7.1 Backend: `VideoDetails.loudness_db: float | None = None`, read in
   `app/adapters/youtube.py` from `vid_info["playerConfig"]["audioConfig"]["loudnessDb"]`
   with every level `.get()`-guarded and non-numeric → `None`. Mirrored in

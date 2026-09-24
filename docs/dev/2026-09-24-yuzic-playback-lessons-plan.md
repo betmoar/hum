@@ -476,6 +476,9 @@ NowPlaying.test.ts: `'prev button is labelled Previous track and calls store.pre
 
 ### Task 6: loudness attenuation (R7)
 
+> **Dropped (2026-09-24):** not shipped. 0.2.0 replaced pytubefix with yt-dlp, which does not expose `loudnessDb`. Kept here as a record.
+
+
 **Files:** Modify `app/models.py`, `app/adapters/youtube.py`,
 `frontend/src/lib/types.ts`, `store.svelte.ts` (`#buildTrack`, `settings.normalizeLoudness`,
 `setNormalizeLoudness`, key `hum.normalize`), `Player.svelte`, `Settings.svelte`;
