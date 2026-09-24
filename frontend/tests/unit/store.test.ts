@@ -806,3 +806,49 @@ describe('pre-existing fixes — repeat replays', () => {
     mod.playerControls.current = null;
   });
 });
+
+describe('code-review fixes — previous/replay', () => {
+  it('history holds no signed URLs, so previous() hands back a track that refetches', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    mod.playerControls.current = { getPosition: () => 0, seekTo: vi.fn() } as any;
+    s.playNow({ ...t('a'), hlsUrl: '/hls/a', _formats: [] as any });
+    s.playNow(t('b'));
+    expect(s.history[0].audioUrl).toBe('');
+    expect(s.history[0].hlsUrl).toBeUndefined();
+    s.previous();
+    expect(s.player.current?.videoId).toBe('a');
+    expect(s.player.current?.audioUrl).toBe('');
+    expect(s.player.current?.hlsUrl).toBeUndefined();
+    mod.playerControls.current = null;
+  });
+
+  it('a live track in history comes back without its expired manifest URL', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    mod.playerControls.current = { getPosition: () => 0, seekTo: vi.fn() } as any;
+    s.playNow({ ...t('L'), isLive: true, audioUrl: '', liveStreamUrl: '/api/live/L/manifest.m3u8?exp=1&sig=x' });
+    s.playNow(t('b'));
+    s.previous();
+    expect(s.player.current?.videoId).toBe('L');
+    expect(s.player.current?.liveStreamUrl).toBeUndefined();
+    mod.playerControls.current = null;
+  });
+
+  it('repeat on a live track does not seek (stays at the live edge)', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    const play = vi.fn();
+    mod.playerControls.current = { seekTo, play } as any;
+    s.playNow({ ...t('L'), isLive: true });
+    s.player.repeat = 'one';
+    s.next();
+    expect(seekTo).not.toHaveBeenCalled();
+    expect(s.player.current?.videoId).toBe('L');
+    s.player.repeat = 'all';
+    s.next();
+    expect(seekTo).not.toHaveBeenCalled();
+    mod.playerControls.current = null;
+  });
+});

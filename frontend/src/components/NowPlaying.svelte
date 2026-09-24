@@ -213,11 +213,11 @@
         <Icon name="shuffle" size={24} />
       </button>
 
-      {#if isSeekable(t)}
-        <button class="ctrl ctrl-prev" onclick={() => store.previous()} aria-label="Previous track">
-          <Icon name="skip-back" size={30} />
-        </button>
-      {/if}
+      <!-- Always shown: previous() restarts seekable tracks and goes back
+           to history from live ones. -->
+      <button class="ctrl ctrl-prev" onclick={() => store.previous()} aria-label="Previous track">
+        <Icon name="skip-back" size={30} />
+      </button>
 
       <button class="ctrl" onclick={togglePlayPause} aria-label={livePaused ? 'Play' : 'Pause'}>
         {#if livePaused}

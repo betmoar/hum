@@ -76,3 +76,17 @@ describe('NowPlaying — previous', () => {
     spy.mockRestore();
   });
 });
+
+describe('NowPlaying — previous on live', () => {
+  it('shows the Previous button for a live track', async () => {
+    store.player.current = {
+      videoId: 'live1', title: 'L', author: 'a', durationSeconds: 0,
+      thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
+      liveStreamUrl: '/api/live/live1/manifest.m3u8?exp=1&sig=x',
+    };
+    store.expandPlayer();
+    const { container } = render(NowPlaying);
+    await tick();
+    expect(container.querySelector('[aria-label="Previous track"]')).not.toBeNull();
+  });
+});

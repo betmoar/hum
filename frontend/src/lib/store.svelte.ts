@@ -207,8 +207,11 @@ class AppStore {
     this.queue = [{ ...t, queueId: t.queueId ?? crypto.randomUUID() }, ...this.queue];
   }
 
+  // History entries are stored stripped: by the time previous() brings one
+  // back its signed URLs may have expired, and an empty URL is what makes
+  // the Player's rehydrate effects refetch fresh ones (VOD and live).
   #pushHistory(t: Track): void {
-    const next = [...this.history, t];
+    const next = [...this.history, stripSignedUrls(t)];
     this.history = next.length > HISTORY_MAX ? next.slice(next.length - HISTORY_MAX) : next;
   }
 
@@ -339,10 +342,15 @@ class AppStore {
   // Replaying the same track can't go through `current`: the src string is
   // unchanged, so the element never reloads and stays parked at the end.
   // Drive the element directly instead.
+  // Live has no start to go back to — rewinding would land at the start of
+  // the DVR buffer or stall, so it just keeps playing at the live edge.
   #replayCurrent(): void {
-    this.player.positionSeconds = 0;
+    const cur = this.player.current;
     this.player.isPlaying = true;
-    playerControls.current?.seekTo?.(0);
+    if (cur && isSeekable(cur)) {
+      this.player.positionSeconds = 0;
+      playerControls.current?.seekTo?.(0);
+    }
     playerControls.current?.play();
   }
 

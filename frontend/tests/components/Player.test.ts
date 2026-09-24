@@ -212,7 +212,7 @@ describe('Player — live tracks', () => {
     expect(container.querySelector('video')).toBeNull();
   });
 
-  it('scrubber and previous button are absent when live', async () => {
+  it('scrubber is absent but previous is available when live', async () => {
     store.player.current = {
       videoId: 'abc12345678', title: 'L', author: 'a', durationSeconds: 0,
       thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
@@ -221,7 +221,8 @@ describe('Player — live tracks', () => {
     const { container } = render(Player);
     await tick();
     expect(container.querySelector('input[type="range"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Previous track"]')).toBeNull();
+    // previous() goes back from live (to history), so the button stays.
+    expect(container.querySelector('[aria-label="Previous track"]')).not.toBeNull();
   });
 
   it('LIVE pill renders when track is live', async () => {

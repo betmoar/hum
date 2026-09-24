@@ -680,11 +680,10 @@
         >
           <Icon name="shuffle" size={18} />
         </button>
-        {#if isSeekable(store.player.current)}
-          <button class="ctrl" onclick={() => store.previous()} aria-label="Previous track">
-            <Icon name="skip-back" size={20} />
-          </button>
-        {/if}
+        <!-- Always shown: previous() handles live (goes back to history). -->
+        <button class="ctrl" onclick={() => store.previous()} aria-label="Previous track">
+          <Icon name="skip-back" size={20} />
+        </button>
         <button
           class="ctrl ctrl-play"
           onclick={() => paused ? safePlay(el) : el?.pause()}
