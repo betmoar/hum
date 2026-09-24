@@ -23,7 +23,7 @@
 <section>
   <header>
     <p class="eyebrow">Preferences</p>
-    <h1>Settings</h1>
+    <h1 id="settings-dialog-title">Settings</h1>
   </header>
 
   <div class="panel glass">

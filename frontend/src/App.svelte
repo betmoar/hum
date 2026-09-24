@@ -6,6 +6,7 @@
   import Player from './components/Player.svelte';
   import NowPlaying from './components/NowPlaying.svelte';
   import Toast from './components/Toast.svelte';
+  import SettingsDialog from './components/SettingsDialog.svelte';
   import Icon from './components/Icon.svelte';
   import HumMark from './components/HumMark.svelte';
   import { applyArtHue } from './lib/artHue.svelte';
@@ -171,7 +172,7 @@
           <Icon name="radio" size={22} />
           <span class="label">Radio</span>
         </a>
-        <a href="#/settings" class:active={router.path === '/settings'} onclick={(e) => { e.preventDefault(); go('/settings'); }}>
+        <a href="#/settings" class:active={router.settingsOpen} onclick={(e) => { e.preventDefault(); router.openSettings(); }}>
           <Icon name="settings" size={22} />
           <span class="label">Settings</span>
         </a>
@@ -194,6 +195,7 @@
 
   <NowPlaying />
   <Toast />
+  <SettingsDialog open={router.settingsOpen} onclose={() => router.closeSettings()} />
 
   {#if showHelp}
     <div class="help-overlay">
