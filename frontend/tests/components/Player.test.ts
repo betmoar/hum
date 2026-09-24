@@ -624,3 +624,45 @@ describe('Player — review fixes', () => {
     expect(play).not.toHaveBeenCalled();
   });
 });
+
+describe('Player — pre-existing fixes', () => {
+  it('ended under repeat one rewinds the element and plays again', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    store.playNow(sampleTrack('r1', '/proxy/audio/r1?x'));
+    store.player.repeat = 'one';
+    try {
+      const { container } = render(Player);
+      await tick();
+      const audio = container.querySelector('audio') as HTMLAudioElement;
+      let ct = 100;
+      Object.defineProperty(audio, 'currentTime', { get: () => ct, set: (v: number) => { ct = v; }, configurable: true });
+      play.mockClear();
+      audio.dispatchEvent(new Event('ended'));
+      await tick();
+      expect(ct).toBe(0);
+      expect(play).toHaveBeenCalled();
+    } finally {
+      store.player.repeat = 'off';
+    }
+  });
+
+  it('rehydrate refetch restores _formats and a consistent itag', async () => {
+    const f251: AudioFormat = { itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus', url: '/proxy/audio/rh?itag=251' };
+    const f140: AudioFormat = { itag: 140, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, codec: 'mp4a.40.2', url: '/proxy/audio/rh?itag=140' };
+    vi.spyOn(api, 'video').mockResolvedValue({
+      video_id: 'rh', title: 'T', author: 'A', channel_id: 'c', duration_seconds: 100,
+      thumbnail_url: '', audio_formats: [f251, f140], video_formats: [],
+    });
+    // Restored track: URL stripped, and its old itag (18) no longer offered.
+    store.player.current = { ...sampleTrack('rh', ''), itag: 18 };
+    store.player.isPlaying = false;
+    render(Player);
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    const cur = store.player.current!;
+    expect(cur.audioUrl).toBe(f251.url);
+    expect(cur.itag).toBe(251);
+    expect(cur.bitrate).toBe(160000);
+    expect(cur._formats?.map((f) => f.itag)).toEqual([251, 140]);
+  });
+});

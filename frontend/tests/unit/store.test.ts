@@ -772,3 +772,37 @@ describe('review fixes — store', () => {
     mod.playerControls.current = null;
   });
 });
+
+describe('pre-existing fixes — repeat replays', () => {
+  it('repeat one: next() seeks to 0 and plays (same src never reloads)', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    const play = vi.fn();
+    mod.playerControls.current = { seekTo, play } as any;
+    s.playNow(t('a'));
+    s.player.repeat = 'one';
+    s.player.isPlaying = false;
+    s.next();
+    expect(seekTo).toHaveBeenCalledWith(0);
+    expect(play).toHaveBeenCalled();
+    expect(s.player.isPlaying).toBe(true);
+    expect(s.player.current?.videoId).toBe('a');
+    mod.playerControls.current = null;
+  });
+
+  it('repeat all with a lone track: next() seeks to 0 and plays', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    const play = vi.fn();
+    mod.playerControls.current = { seekTo, play } as any;
+    s.playNow(t('a'));
+    s.player.repeat = 'all';
+    s.next();
+    expect(seekTo).toHaveBeenCalledWith(0);
+    expect(play).toHaveBeenCalled();
+    expect(s.player.current?.videoId).toBe('a');
+    mod.playerControls.current = null;
+  });
+});

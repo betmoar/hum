@@ -460,6 +460,9 @@
         same = pickForTier(fresh.audio_formats, tierUsed, detectAudioEnv()) ?? fresh.audio_formats[0];
       }
       if (same) {
+        // itag/bitrate follow the chosen format (it may be the fallback), and
+        // _formats comes back so codec-fallback recovery works for restored
+        // tracks too (it was stripped on persist).
         store.player.current = {
           ...t,
           audioUrl: same.url,

@@ -246,17 +246,14 @@ class AppStore {
   next(): void {
     // 'one' replays current if there is one.
     if (this.player.repeat === 'one' && this.player.current) {
-      this.player.positionSeconds = 0;
-      this.player.current = { ...this.player.current };
-      this.player.isPlaying = true;
+      this.#replayCurrent();
       return;
     }
 
     // No queue: 'all' wraps current if present; otherwise stop.
     if (this.queue.length === 0) {
       if (this.player.repeat === 'all' && this.player.current) {
-        this.player.positionSeconds = 0;
-        this.player.current = { ...this.player.current };
+        this.#replayCurrent();
         return;
       }
       if (this.player.current) this.#pushHistory(this.player.current);
@@ -339,12 +336,14 @@ class AppStore {
     return getBookmark(t.videoId) ?? 0;
   }
 
-  /** Restart the current track from the beginning. */
-  restart(): void {
-    if (!this.player.current) return;
+  // Replaying the same track can't go through `current`: the src string is
+  // unchanged, so the element never reloads and stays parked at the end.
+  // Drive the element directly instead.
+  #replayCurrent(): void {
     this.player.positionSeconds = 0;
-    // Force a reactive update so the Player picks up the position reset.
-    this.player.current = { ...this.player.current };
+    this.player.isPlaying = true;
+    playerControls.current?.seekTo?.(0);
+    playerControls.current?.play();
   }
 
   notify(message: string, kind: Toast['kind'] = 'info', action?: Toast['action'], durationMs = 5000): void {
