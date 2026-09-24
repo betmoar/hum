@@ -1,6 +1,5 @@
-Hand-written yt-dlp `extract_info` shapes used by `tests/unit/test_youtube_ytdlp.py`.
+Scrubbed real yt-dlp `extract_info` responses used by `tests/unit/test_youtube_adapter.py`.
 
-UNVERIFIED against real YouTube until replaced by
-`uv run python scripts/bench_yt_backends.py --capture` output (run where
-YouTube is reachable). The capture writes `video_vod.json`, `video_live.json`
-and `search_flat.json` here; the unit tests load them when present.
+Re-capture where YouTube is reachable (needs deno):
+`uv run python scripts/capture_ytdlp_fixtures.py`. Signed, IP-bound CDN URLs are
+replaced by placeholders, so the files are safe to commit.

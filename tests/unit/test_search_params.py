@@ -1,8 +1,8 @@
 """Backend-neutral search `sp=` encoder.
 
 Expected strings are pytubefix 10.7.3's own encodings of the same filter
-dicts (captured via pytubefix.protobuf.encode_protobuf), so the yt-dlp backend
-sends YouTube byte-identical filters to what the pytubefix path sends today.
+dicts (captured via pytubefix.protobuf.encode_protobuf before pytubefix was
+removed), so search sends YouTube byte-identical filters to the old path.
 """
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ from app.adapters.search_params import build_search_sp, encode_message
         ("music", True, "Eg8IAUABmgEIL20vMDRybGY="),
     ],
 )
-def test_build_search_sp_matches_pytubefix(category: str | None, live: bool, expected: str | None) -> None:
+def test_build_search_sp_matches_reference_encoding(category: str | None, live: bool, expected: str | None) -> None:
     assert build_search_sp(category=category, live=live) == expected
 
 
 def test_encode_message_video_type_only() -> None:
-    # {2: {1: 1}} is pytubefix's "type=Video" filter.
+    # {2: {1: 1}} is the "type=Video" filter.
     assert encode_message({2: {1: 1}}) == "EgIIAQ=="
 
 

@@ -1,200 +1,386 @@
-"""Tests for the pytubefix-based YouTube adapter."""
+"""Tests for the yt-dlp-based YouTube adapter (app/adapters/youtube.py).
+
+YoutubeDL is faked via youtube._make_ydl; no network. Covers format mapping,
+error mapping, caching/single-flight, live-stream handling, channel/playlist
+mapping, search sp-param filtering, and the deno startup check.
+"""
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import time
+import urllib.parse
+from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from app.adapters import youtube as adapter
+from app.adapters import youtube
+from app.adapters.search_params import build_search_sp
+from app.adapters.youtube import YouTubeError
 from app.models import ChannelInfo, PlaylistInfo, VideoDetails
 
-
-def _mock_stream(itag: int, mime_type: str, bitrate: int, **kw: Any) -> MagicMock:
-    s = MagicMock()
-    s.itag = itag
-    s.mime_type = mime_type
-    s.bitrate = bitrate
-    s.url = f"https://rr1---sn-test.googlevideo.com/videoplayback?itag={itag}"
-    s.includes_audio_track = "audio" in mime_type or kw.get("has_audio", False)
-    s.includes_video_track = mime_type.startswith("video/")
-    s.resolution = kw.get("resolution")
-    s.fps = kw.get("fps")
-    s.audio_sample_rate = kw.get("audio_sample_rate")
-    # pytubefix-style attributes
-    s.width = kw.get("width")
-    s.height = kw.get("height")
-    return s
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "ytdlp"
+EXPIRE = int(time.time()) + 20000  # beyond the 1 h clamp
 
 
-def _mock_youtube(video_id: str = "dQw4w9WgXcQ") -> MagicMock:
-    yt = MagicMock()
-    yt.video_id = video_id
-    yt.title = "Test Title"
-    yt.author = "Test Author"
-    yt.channel_id = "UCtest"
-    yt.length = 213
-    yt.views = 1_400_000_000
-    yt.description = "Test description"
-    yt.thumbnail_url = "https://i.ytimg.com/vi/" + video_id + "/maxres.jpg"
-    streams = [
-        _mock_stream(140, 'audio/mp4; codecs="mp4a.40.2"', 128000, audio_sample_rate=44100),
-        _mock_stream(251, 'audio/webm; codecs="opus"', 160000, audio_sample_rate=48000),
-        _mock_stream(
-            137, 'video/mp4; codecs="avc1.640028"', 4_000_000,
-            width=1920, height=1080, fps=30, resolution="1080p",
-        ),
-    ]
-    sq = MagicMock()
-    sq.__iter__ = lambda self: iter(streams)
-    yt.streams = sq
-    return yt
+def _fmt(format_id: str, **kw: Any) -> dict[str, Any]:
+    base = {
+        "format_id": format_id,
+        "url": f"https://rr1---sn.googlevideo.com/videoplayback?itag={format_id}&expire={EXPIRE}",
+        "protocol": "https",
+        "vcodec": "none",
+        "acodec": "none",
+    }
+    base.update(kw)
+    return base
+
+
+VOD_INFO: dict[str, Any] = {
+    "id": "abc12345678",
+    "title": "Song",
+    "channel": "Artist",
+    "uploader": "Artist - Topic",
+    "channel_id": "UC123",
+    "duration": 215,
+    "view_count": 1000,
+    "live_status": "not_live",
+    "formats": [
+        _fmt("sb0", ext="mhtml", protocol="mhtml"),
+        _fmt("140", ext="m4a", acodec="mp4a.40.2", abr=129.5, asr=44100, audio_channels=2),
+        _fmt("140-drc", ext="m4a", acodec="mp4a.40.2", abr=129.5),
+        _fmt("251", ext="webm", acodec="opus", abr=140.1, asr=48000, audio_channels=2),
+        _fmt("251", ext="webm", acodec="opus", abr=1.0),  # duplicate itag from a 2nd client
+        _fmt("233", ext="mp4", acodec="mp4a.40.5", protocol="m3u8_native"),
+        _fmt("18", ext="mp4", vcodec="avc1.42001E", acodec="mp4a.40.2", tbr=500.0,
+             width=640, height=360, fps=30),
+        _fmt("137", ext="mp4", vcodec="avc1.640028", tbr=4000.0, width=1920, height=1080, fps=30),
+    ],
+}
+
+NO_FORMATS_INFO: dict[str, Any] = {
+    "id": "noFormats00",
+    "title": "No Formats",
+    "channel": "A",
+    "channel_id": "UCx",
+    "duration": 10,
+    "view_count": 1,
+    "live_status": "not_live",
+    "formats": [],
+}
+
+LIVE_INFO: dict[str, Any] = {
+    "id": "live1234567",
+    "title": "Radio",
+    "channel": "Station",
+    "channel_id": "UCLIVE",
+    "live_status": "is_live",
+    "formats": [_fmt("95", ext="mp4", protocol="m3u8_native", vcodec="avc1", acodec="mp4a.40.2",
+                     manifest_url="https://manifest.googlevideo.com/api/manifest/hls_variant/x")],
+}
+
+LIVE_NO_MANIFEST_INFO: dict[str, Any] = {
+    "id": "live1234567",
+    "title": "Radio",
+    "channel": "Station",
+    "channel_id": "UCLIVE",
+    "live_status": "is_live",
+    "formats": [_fmt("95", ext="mp4", protocol="https", vcodec="avc1", acodec="mp4a.40.2")],
+}
+
+SEARCH_INFO: dict[str, Any] = {
+    "_type": "playlist",
+    "entries": [
+        {"_type": "url", "ie_key": "Youtube", "id": "vid00000001", "title": "Track One",
+         "channel": "Artist A", "duration": 200.0,
+         "thumbnails": [{"url": "https://i.ytimg.com/vi/vid00000001/hq720.jpg"}],
+         "url": "https://www.youtube.com/watch?v=vid00000001"},
+        {"_type": "url", "ie_key": "Youtube", "id": "vid00000002", "title": "Live Set",
+         "channel": "Artist B", "live_status": "is_live",
+         "url": "https://www.youtube.com/watch?v=vid00000002"},
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "UCchan", "title": "Artist A",
+         "url": "https://www.youtube.com/channel/UCchan",
+         "thumbnails": [{"url": "//yt3.ggpht.com/abc"}]},
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "PLlist", "title": "Best Of",
+         "uploader": "Curator", "playlist_count": 12,
+         "url": "https://www.youtube.com/playlist?list=PLlist"},
+    ],
+}
+
+CHANNEL_INFO: dict[str, Any] = {
+    "id": "UCabc123",
+    "channel_id": "UCabc123",
+    "channel": "Test Channel",
+    "description": "channel description",
+    "channel_follower_count": 5000,
+    "thumbnails": [
+        # Widest is "banner", but avatar_uncropped must still win (preferred id).
+        {"id": "avatar_uncropped", "url": "https://yt3.ggpht.com/avatar_uncropped.jpg", "width": 800},
+        {"id": "banner_uncropped", "url": "https://yt3.ggpht.com/banner.jpg", "width": 1920},
+    ],
+}
+
+PLAYLIST_INFO: dict[str, Any] = {
+    "title": "My Playlist",
+    "uploader": "Curator",
+    "playlist_count": 2,
+    "entries": [
+        {"id": "vid1", "title": "Item One", "channel": "Author", "duration": 60,
+         "thumbnails": [{"url": "https://i.ytimg.com/vi/vid1/default.jpg", "width": 120},
+                        {"url": "https://i.ytimg.com/vi/vid1/hq720.jpg", "width": 1280}]},
+        {"id": None, "title": "Skip Me — no id"},
+        "not-a-dict",
+    ],
+}
+
+PLAYLIST_MISSING_TITLE_INFO: dict[str, Any] = {
+    "title": "",
+    "entries": [],
+}
+
+
+def _captured(name: str, fallback: dict[str, Any]) -> dict[str, Any]:
+    p = FIXTURES / name
+    return json.loads(p.read_text()) if p.exists() else fallback
+
+
+class FakeYDL:
+    calls: list[tuple[dict[str, Any], str]] = []
+
+    def __init__(self, opts: dict[str, Any], result: Any) -> None:
+        self.opts = opts
+        self.result = result
+
+    def __enter__(self) -> FakeYDL:
+        return self
+
+    def __exit__(self, *a: Any) -> None:
+        return None
+
+    def extract_info(self, url: str, download: bool = True) -> Any:
+        assert download is False
+        FakeYDL.calls.append((self.opts, url))
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
 
 
 @pytest.fixture(autouse=True)
-def reset_cache() -> None:
-    adapter._stream_url_cache.clear()
-    adapter._inflight_refresh.clear()
+def _clean() -> None:
+    # Adapter caches are cleared by the conftest autouse fixture; only the
+    # FakeYDL call log is local to this file.
+    FakeYDL.calls = []
 
 
-async def test_video_returns_details(monkeypatch: pytest.MonkeyPatch) -> None:
-    yt_mock = _mock_youtube()
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt_mock)
+def _install(monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
+    monkeypatch.setattr(youtube, "_make_ydl", lambda opts: FakeYDL(opts, result))
 
-    v = await adapter.video("dQw4w9WgXcQ")
 
+# ---- _fetch_video (sync, thread-bound) -------------------------------------
+
+
+def test_vod_maps_formats_and_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    d = youtube._fetch_video("abc12345678")
+    assert (d.title, d.author, d.channel_id, d.duration_seconds, d.view_count) == (
+        "Song", "Artist", "UC123", 215, 1000)
+    assert d.thumbnail_url == "/proxy/thumbnail/abc12345678"
+    assert d.is_live is False
+    assert [(a.itag, a.mime_type, a.codec, a.bitrate) for a in d.audio_formats] == [
+        (140, 'audio/mp4; codecs="mp4a.40.2"', "aac", 129500),
+        (251, 'audio/webm; codecs="opus"', "opus", 140100),
+    ]
+    assert d.audio_formats[0].url == "/proxy/audio/abc12345678?itag=140"
+    assert d.audio_formats[0].sample_rate == 44100
+    assert [(v.itag, v.has_audio, v.height) for v in d.video_formats] == [(18, True, 360), (137, False, 1080)]
+    assert d.video_formats[0].url == "/proxy/stream/abc12345678?itag=18"
+
+
+def test_vod_writes_stream_cache_with_clamped_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    before = time.time()
+    youtube._fetch_video("abc12345678")
+    url, expiry = youtube._stream_url_cache[("abc12345678", 140)]
+    assert "itag=140" in url
+    assert expiry <= time.time() + youtube._CACHE_MAX_TTL
+    assert expiry >= before + youtube._CACHE_MAX_TTL - 5
+    # First occurrence of a duplicated itag wins; non-numeric ids and manifests are skipped.
+    assert "itag=251" in youtube._stream_url_cache[("abc12345678", 251)][0]
+    assert ("abc12345678", 233) not in youtube._stream_url_cache
+
+
+def test_vod_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    youtube._fetch_video("abc12345678")
+    opts, url = FakeYDL.calls[0]
+    assert url == "https://www.youtube.com/watch?v=abc12345678"
+    assert opts["quiet"] and opts["skip_download"] and opts["noplaylist"]
+
+
+def test_vod_with_no_formats_returns_empty_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, NO_FORMATS_INFO)
+    d = youtube._fetch_video("noFormats00")
+    assert d.audio_formats == []
+    assert d.video_formats == []
+    assert d.title == "No Formats"
+
+
+def test_live_maps_to_live_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, LIVE_INFO)
+    d = youtube._fetch_video("live1234567")
+    assert d.is_live is True
+    assert d.live_stream_url == "/api/live/live1234567/manifest.m3u8"
+    assert d.audio_formats == [] and d.title == "Radio" and d.author == "Station"
+    # Invariant 3: no raw CDN URL anywhere in what goes to the client.
+    assert "googlevideo" not in d.model_dump_json()
+
+
+def test_captured_fixtures_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = _captured("video_vod.json", VOD_INFO)
+    _install(monkeypatch, info)
+    d = youtube._fetch_video(str(info["id"]))
+    assert {a.itag for a in d.audio_formats} & {140, 251}
+
+
+# ---- errors -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "code"),
+    [
+        ("ERROR: [youtube] x: Sign in to confirm you're not a bot", 503, "YOUTUBE_BLOCKED"),
+        ("ERROR: [youtube] x: Sign in to confirm your age", 503, "YOUTUBE_BLOCKED"),
+        ("ERROR: [youtube] x: This video requires a PO Token", 503, "YOUTUBE_BLOCKED"),
+        ("ERROR: [youtube] x: Video unavailable", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] aaaaaaaaaaa: This video is unavailable", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] x: Private video", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] x: This video has been removed by the uploader", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube:tab] x: This channel does not exist.", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube:tab] x: The playlist does not exist.", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] x: nsig extraction failed", 502, "UPSTREAM_FAILURE"),
+    ],
+)
+def test_error_mapping(monkeypatch: pytest.MonkeyPatch, message: str, status: int, code: str) -> None:
+    from yt_dlp.utils import DownloadError
+
+    _install(monkeypatch, DownloadError(message))
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("x")
+    assert (ei.value.status, ei.value.code) == (status, code)
+
+
+def test_unexpected_exception_is_upstream_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, KeyError("formats"))
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("x")
+    assert ei.value.status == 502
+
+
+# ---- _search_hits (sync, thread-bound) ---------------------------------------
+
+
+def test_search_maps_flat_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    hits = youtube._search_hits("q", 10, None)
+    assert [(h.kind, h.id, h.title) for h in hits] == [
+        ("video", "vid00000001", "Track One"),
+        ("video", "vid00000002", "Live Set"),
+        ("channel", "UCchan", "Artist A"),
+        ("playlist", "PLlist", "Best Of"),
+    ]
+    v = hits[0]
+    assert (v.author, v.duration_seconds, v.thumbnail_url) == (
+        "Artist A", 200, "https://i.ytimg.com/vi/vid00000001/hq720.jpg")
+    assert hits[1].is_live is True
+    # Fallback thumbnail from the id when the entry has none.
+    assert hits[1].thumbnail_url == "https://i.ytimg.com/vi/vid00000002/hqdefault.jpg"
+    assert hits[2].thumbnail_url == "https://yt3.ggpht.com/abc"
+    assert (hits[3].author, hits[3].video_count) == ("Curator", 12)
+
+
+def test_search_limit_and_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    hits = youtube._search_hits("daft punk", 2, "Eg0IAZoBCC9tLzA0cmxm")
+    assert len(hits) == 2
+    opts, url = FakeYDL.calls[0]
+    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 2
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    assert qs["search_query"] == ["daft punk"]
+    assert qs["sp"] == ["Eg0IAZoBCC9tLzA0cmxm"]
+
+
+def test_search_without_filter_has_no_sp(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    youtube._search_hits("q", 5, None)
+    assert "sp=" not in FakeYDL.calls[0][1]
+
+
+def test_search_skips_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, {"entries": [None, {"ie_key": "Youtube"}, SEARCH_INFO["entries"][0]]})
+    assert [h.id for h in youtube._search_hits("q", 10, None)] == ["vid00000001"]
+
+
+def test_yt_dlp_output_goes_to_logging_not_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    youtube._fetch_video("abc12345678")
+    lg = FakeYDL.calls[0][0]["logger"]
+    for method in ("debug", "info", "warning", "error"):
+        getattr(lg, method)("msg")  # must not raise
+
+
+def test_captured_search_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = FIXTURES / "search_flat.json"
+    if not p.exists():
+        pytest.skip("no captured search fixture yet (run bench --capture)")
+    _install(monkeypatch, json.loads(p.read_text()))
+    hits = youtube._search_hits("q", 20, None)
+    videos = [h for h in hits if h.kind == "video"]
+    assert videos and all(h.title for h in videos)
+
+
+# ---- video() through the adapter (cache + single-flight) --------------------
+
+
+async def test_video_returns_details_and_populates_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    v = await youtube.video("abc12345678")
     assert isinstance(v, VideoDetails)
-    assert v.video_id == "dQw4w9WgXcQ"
-    assert v.title == "Test Title"
-    assert v.duration_seconds == 213
-    assert v.audio_formats, "expected audio formats"
-    assert v.video_formats, "expected video formats"
-    # audio first format is one of the audio itags
-    assert v.audio_formats[0].itag in {140, 251}
+    assert v.video_id == "abc12345678"
+    assert v.title == "Song"
+    assert v.audio_formats and v.video_formats
+    assert ("abc12345678", 140) in youtube._stream_url_cache
+    assert ("abc12345678", 251) in youtube._stream_url_cache
 
 
-async def test_video_populates_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    yt_mock = _mock_youtube()
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt_mock)
-
-    await adapter.video("dQw4w9WgXcQ")
-
-    # Cache should have entries for each itag.
-    keys = list(adapter._stream_url_cache.keys())
-    assert ("dQw4w9WgXcQ", 140) in keys
-    assert ("dQw4w9WgXcQ", 251) in keys
+async def test_video_metadata_cached_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    d1 = await youtube.video("abc12345678")
+    d2 = await youtube.video("abc12345678")
+    assert d1.title == d2.title == "Song"
+    assert len(FakeYDL.calls) == 1  # second call served from the metadata cache
 
 
-async def test_resolve_upstream_url_returns_cached(monkeypatch: pytest.MonkeyPatch) -> None:
-    yt_mock = _mock_youtube()
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt_mock)
-
-    await adapter.video("dQw4w9WgXcQ")
-    url = await adapter.resolve_upstream_url("dQw4w9WgXcQ", 140)
-    assert url.startswith("https://rr1---sn-test.googlevideo.com/")
-
-
-async def test_resolve_upstream_url_unknown_itag_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    yt_mock = _mock_youtube()
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt_mock)
-
-    with pytest.raises(adapter.YouTubeError) as ei:
-        await adapter.resolve_upstream_url("dQw4w9WgXcQ", 9999)
-    assert ei.value.status == 404
-
-
-def test_iter_streams_swallows_pytubefix_errors() -> None:
-    """A yt whose .streams access raises (LiveStreamError, MembersOnly, …) must
-    yield an empty iterator rather than propagating — a single dead video must
-    not 500 the whole request."""
-    class Boom:
-        @property
-        def streams(self) -> list[Any]:
-            raise RuntimeError("LiveStreamError")
-
-    assert list(adapter._iter_streams(Boom())) == []
-
-
-def test_iter_streams_yields_when_iterable() -> None:
-    class Ok:
-        streams = [object(), object()]
-
-    assert len(list(adapter._iter_streams(Ok()))) == 2
-
-
-async def test_video_with_no_formats_returns_empty_lists(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A video that exposes no usable streams yields empty format lists rather
-    than erroring."""
-    yt = MagicMock()
-    yt.video_id = "noFormats00"
-    yt.title = "No Formats"
-    yt.author = "A"
-    yt.channel_id = "UCx"
-    yt.length = 10
-    yt.views = 1
-    yt.description = "d"
-    empty = MagicMock()
-    empty.__iter__ = lambda self: iter([])
-    yt.streams = empty
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt)
-
-    v = await adapter.video("noFormats00")
+async def test_video_with_no_formats_returns_empty_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, NO_FORMATS_INFO)
+    v = await youtube.video("noFormats00")
     assert v.audio_formats == []
     assert v.video_formats == []
 
 
-def test_evict_expired_removes_stale_keeps_live() -> None:
-    now = time.time()
-    adapter._stream_url_cache[("vidA", 1)] = ("https://x/1", now - 10)    # expired
-    adapter._stream_url_cache[("vidB", 2)] = ("https://x/2", now + 3600)  # live
-
-    adapter._evict_expired()
-
-    assert ("vidA", 1) not in adapter._stream_url_cache
-    assert ("vidB", 2) in adapter._stream_url_cache
+async def test_resolve_upstream_url_returns_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    await youtube.video("abc12345678")
+    url = await youtube.resolve_upstream_url("abc12345678", 140)
+    assert "itag=140" in url
 
 
-def test_evict_stream_url_removes_only_target_entry() -> None:
-    adapter._stream_url_cache[("vidA", 140)] = ("https://x/1", time.time() + 100)
-    adapter._stream_url_cache[("vidA", 251)] = ("https://x/2", time.time() + 100)
-
-    adapter.evict_stream_url("vidA", 140)
-
-    assert ("vidA", 140) not in adapter._stream_url_cache
-    assert ("vidA", 251) in adapter._stream_url_cache
-
-
-def test_evict_stream_url_missing_key_is_noop() -> None:
-    adapter.evict_stream_url("nope", 999)  # must not raise
-
-
-async def test_concurrent_resolve_dedupes_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Concurrent cache-miss resolves for the same video must collapse onto a
-    single pytubefix fetch rather than each firing their own."""
-    import asyncio
-
-    yt_mock = _mock_youtube()
-    calls = {"n": 0}
-
-    def counting_make(vid: str) -> MagicMock:
-        calls["n"] += 1
-        return yt_mock
-
-    monkeypatch.setattr(adapter, "_make_youtube", counting_make)
-
-    results = await asyncio.gather(
-        *[adapter.resolve_upstream_url("dQw4w9WgXcQ", 140) for _ in range(5)]
-    )
-
-    assert all(r.startswith("https://rr1---sn-test.googlevideo.com/") for r in results)
-    assert calls["n"] == 1, f"expected 1 refresh, got {calls['n']}"
-    # The in-flight entry must be cleaned up once the refresh completes.
-    assert adapter._inflight_refresh == {}
+async def test_resolve_upstream_url_unknown_itag_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    with pytest.raises(YouTubeError) as ei:
+        await youtube.resolve_upstream_url("abc12345678", 9999)
+    assert ei.value.status == 404
+    assert ei.value.code == "ITAG_NOT_FOUND"
 
 
 async def test_resolve_rejects_and_evicts_stale_itag_after_refresh(
@@ -202,540 +388,269 @@ async def test_resolve_rejects_and_evicts_stale_itag_after_refresh(
 ) -> None:
     """A previously-cached itag the refresh no longer offers must yield 404 —
     not a resurrected expired URL — and the stale entry must be evicted."""
-    yt_mock = _mock_youtube()
-    monkeypatch.setattr(adapter, "_make_youtube", lambda vid: yt_mock)
-    # Seed an expired entry for an itag the fresh fetch won't provide (140/251/137).
-    adapter._stream_url_cache[("dQw4w9WgXcQ", 999)] = (
+    _install(monkeypatch, VOD_INFO)
+    youtube._stream_url_cache[("abc12345678", 999)] = (
         "https://stale.googlevideo.com/expired", time.time() - 1
     )
 
-    with pytest.raises(adapter.YouTubeError) as ei:
-        await adapter.resolve_upstream_url("dQw4w9WgXcQ", 999)
+    with pytest.raises(YouTubeError) as ei:
+        await youtube.resolve_upstream_url("abc12345678", 999)
 
     assert ei.value.status == 404
-    assert ("dQw4w9WgXcQ", 999) not in adapter._stream_url_cache
-
-
-async def test_search_returns_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    v1 = MagicMock()
-    v1.video_id = "abc123"
-    v1.title = "Video One"
-    v1.author = "Author One"
-    v1.length = 100
-    v1.thumbnail_url = "https://x/1"
-    v2 = MagicMock()
-    v2.video_id = "def456"
-    v2.title = "Video Two"
-    v2.author = "Author Two"
-    v2.length = 200
-    v2.thumbnail_url = "https://x/2"
-
-    search_mock = MagicMock()
-    search_mock.videos = [v1, v2]
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: search_mock)
-
-    hits = await adapter.search("anything", limit=10)
-
-    assert len(hits) == 2
-    assert hits[0].kind == "video"
-    assert hits[0].id == "abc123"
-    assert hits[0].title == "Video One"
-    assert hits[0].duration_seconds == 100
-
-
-async def test_channel_returns_info(monkeypatch: pytest.MonkeyPatch) -> None:
-    ch = MagicMock()
-    ch.channel_name = "Test Channel"
-    ch.channel_id = "UCabcdef"
-    ch.description = "channel description"
-    monkeypatch.setattr(adapter, "_make_channel", lambda cid: ch)
-
-    info = await adapter.channel("UCabcdef")
-    assert isinstance(info, ChannelInfo)
-    assert info.channel_id == "UCabcdef"
-    assert info.title == "Test Channel"
-
-
-async def test_playlist_returns_info(monkeypatch: pytest.MonkeyPatch) -> None:
-    v = MagicMock()
-    v.video_id = "vid1"
-    v.title = "Item One"
-    v.author = "Author"
-    v.length = 60
-    v.thumbnail_url = "https://x"
-
-    pl = MagicMock()
-    pl.title = "My Playlist"
-    pl.length = 1
-    pl.owner = "Owner"
-    pl.owner_id = "UCowner"
-    pl.videos = [v]
-    monkeypatch.setattr(adapter, "_make_playlist", lambda pid: pl)
-
-    info = await adapter.playlist("PLabc")
-    assert isinstance(info, PlaylistInfo)
-    assert info.playlist_id == "PLabc"
-    assert info.title == "My Playlist"
-    assert info.video_count == 1
-    assert info.items[0].video_id == "vid1"
-
-
-async def test_playlist_handles_missing_title(monkeypatch: pytest.MonkeyPatch) -> None:
-    """pytubefix sometimes raises on .title for some playlists. Adapter should fall back."""
-    pl = MagicMock()
-    # property that raises
-    type(pl).title = property(lambda self: (_ for _ in ()).throw(KeyError("simpleText")))
-    pl.length = 0
-    pl.owner = "Owner"
-    pl.owner_id = "UCowner"
-    pl.videos = []
-    monkeypatch.setattr(adapter, "_make_playlist", lambda pid: pl)
-
-    info = await adapter.playlist("PLbroken")
-    # Falls back to a placeholder.
-    assert info.playlist_id == "PLbroken"
-    assert info.title  # not empty string
-
-
-def test_search_passes_type_video_when_category_set(monkeypatch) -> None:
-    """When category='music' is requested, the adapter must apply Filter type=Video."""
-    import asyncio
-
-    from app.adapters import youtube as adapter
-
-    captured: dict = {}
-
-    class FakeSearch:
-        def __init__(self, query, filters=None, **kwargs):  # noqa: D401
-            captured["query"] = query
-            captured["filters"] = filters
-        @property
-        def videos(self): return []
-        @property
-        def channels(self): return []
-        @property
-        def playlists(self): return []
+    assert ("abc12345678", 999) not in youtube._stream_url_cache
 
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: FakeSearch(q, **kw))
 
-    asyncio.run(adapter.search("foo", limit=5, category="music"))
-    assert captured["filters"] is not None
+async def test_concurrent_resolve_dedupes_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent cache-miss resolves for the same video must collapse onto a
+    single yt-dlp extraction rather than each firing their own."""
+    _install(monkeypatch, VOD_INFO)
 
+    results = await asyncio.gather(
+        *[youtube.resolve_upstream_url("abc12345678", 140) for _ in range(5)]
+    )
 
-def test_search_passes_live_feature(monkeypatch) -> None:
-    """When live=True is requested, the adapter must apply Filter features=Live."""
-    import asyncio
+    assert all("itag=140" in r for r in results)
+    assert len(FakeYDL.calls) == 1, f"expected 1 extract_info call, got {len(FakeYDL.calls)}"
+    assert youtube._inflight_refresh == {}
 
-    from app.adapters import youtube as adapter
 
-    captured: dict = {}
+# ---- eviction (backend-neutral) ----------------------------------------------
 
-    class FakeSearch:
-        def __init__(self, query, filters=None):
-            captured["filters"] = filters
-        @property
-        def videos(self): return []
-        @property
-        def channels(self): return []
-        @property
-        def playlists(self): return []
 
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: FakeSearch(q, **kw))
-    asyncio.run(adapter.search("foo", limit=5, live=True))
-    assert captured["filters"] is not None
+def test_evict_expired_removes_stale_keeps_live() -> None:
+    now = time.time()
+    youtube._stream_url_cache[("vidA", 1)] = ("https://x/1", now - 10)    # expired
+    youtube._stream_url_cache[("vidB", 2)] = ("https://x/2", now + 3600)  # live
 
+    youtube._evict_expired()
 
-def test_search_without_filters_passes_no_filter(monkeypatch) -> None:
-    """Plain search() must NOT pass a filters arg (preserves legacy callers)."""
-    import asyncio
+    assert ("vidA", 1) not in youtube._stream_url_cache
+    assert ("vidB", 2) in youtube._stream_url_cache
 
-    from app.adapters import youtube as adapter
 
-    captured: dict = {"called_with_filters": False}
+def test_evict_stream_url_removes_only_target_entry() -> None:
+    youtube._stream_url_cache[("vidA", 140)] = ("https://x/1", time.time() + 100)
+    youtube._stream_url_cache[("vidA", 251)] = ("https://x/2", time.time() + 100)
 
-    class FakeSearch:
-        def __init__(self, query, **kwargs):
-            captured["called_with_filters"] = "filters" in kwargs and kwargs["filters"] is not None
-        @property
-        def videos(self): return []
-        @property
-        def channels(self): return []
-        @property
-        def playlists(self): return []
+    youtube.evict_stream_url("vidA", 140)
 
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: FakeSearch(q, **kw))
-    asyncio.run(adapter.search("foo", limit=5))
-    assert captured["called_with_filters"] is False
+    assert ("vidA", 140) not in youtube._stream_url_cache
+    assert ("vidA", 251) in youtube._stream_url_cache
 
 
-def test_hit_from_pytube_video_extracts_is_live() -> None:
-    """is_live is populated from the pytubefix video object when present."""
-    from app.adapters.youtube import _hit_from_pytube_video
+def test_evict_stream_url_missing_key_is_noop() -> None:
+    youtube.evict_stream_url("nope", 999)  # must not raise
 
-    class V:
-        video_id = "abc"
-        title = "t"
-        author = "a"
-        thumbnail_url = "x"
-        length = 100
-        is_live = True
 
-    hit = _hit_from_pytube_video(V())
-    assert hit.is_live is True
+# ---- live: video() end-to-end ------------------------------------------------
 
 
-def test_build_search_filters_includes_music_topic_when_category_music() -> None:
-    """category='music' must produce a filters dict that triggers the music topic sp injection."""
-    from app.adapters.youtube import _build_search_filters
+async def test_video_live_returns_live_details_with_no_formats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, LIVE_INFO)
+    v = await youtube.video("live1234567")
+    assert v.is_live is True
+    assert v.live_stream_url == "/api/live/live1234567/manifest.m3u8"
+    assert v.audio_formats == [] and v.video_formats == []
+    assert "googlevideo" not in v.model_dump_json()
 
-    f = _build_search_filters(category="music", live=False)
-    assert f is not None
-    # The implementation marks the music filter with a sentinel key the
-    # search() wrapper later recognises and acts on.
-    assert f.get("_music_topic") is True
 
+# ---- _fetch_live_manifest (sync, thread-bound) -------------------------------
 
-def test_search_overwrites_filter_when_category_music(monkeypatch) -> None:
-    """When category='music' is requested, search() must overwrite `s.filter`
-    via `_inject_music_topic` so the InnerTube call carries the music topic."""
-    import asyncio
 
-    from app.adapters import youtube as adapter
+def test_fetch_live_manifest_returns_info_when_manifest_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, LIVE_INFO)
+    info = youtube._fetch_live_manifest("live1234567")
+    assert isinstance(info, youtube.LiveStreamInfo)
+    assert info.master_hls_url == "https://manifest.googlevideo.com/api/manifest/hls_variant/x"
+    assert info.title == "Radio"
+    assert info.author == "Station"
+    assert info.channel_id == "UCLIVE"
 
-    class FakeSearch:
-        def __init__(self, query, filters=None):
-            self.filter = "PYTUBEFIX_DEFAULT"
-        @property
-        def videos(self): return []
-        @property
-        def channels(self): return []
-        @property
-        def playlists(self): return []
 
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: FakeSearch(q, **kw))
+def test_fetch_live_manifest_returns_none_when_not_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    assert youtube._fetch_live_manifest("abc12345678") is None
 
-    captured_args: dict = {}
 
-    def fake_inject(search_instance, pytubefix_filters):
-        captured_args["pytubefix_filters"] = pytubefix_filters
-        search_instance.filter = "INJECTED"
+def test_fetch_live_manifest_returns_none_when_no_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, LIVE_NO_MANIFEST_INFO)
+    assert youtube._fetch_live_manifest("live1234567") is None
 
-    monkeypatch.setattr(adapter, "_inject_music_topic", fake_inject)
 
-    asyncio.run(adapter.search("foo", limit=5, category="music"))
-    # The injector was called with the type=Video filters dict (sans sentinel).
-    assert captured_args["pytubefix_filters"] is not None
-    assert "_music_topic" not in captured_args["pytubefix_filters"]
+def test_fetch_live_manifest_returns_none_on_extraction_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from yt_dlp.utils import DownloadError
 
+    _install(monkeypatch, DownloadError("ERROR: [youtube] x: nsig extraction failed"))
+    assert youtube._fetch_live_manifest("live1234567") is None
 
-def test_search_does_not_inject_when_category_absent(monkeypatch) -> None:
-    """category=None must not invoke `_inject_music_topic`."""
-    import asyncio
 
-    from app.adapters import youtube as adapter
+# ---- resolve_live_master_url (monkeypatches _fetch_live_manifest directly) --
 
-    class FakeSearch:
-        def __init__(self, query, filters=None):
-            self.filter = None
-        @property
-        def videos(self): return []
-        @property
-        def channels(self): return []
-        @property
-        def playlists(self): return []
 
-    monkeypatch.setattr(adapter, "_make_search", lambda q, **kw: FakeSearch(q, **kw))
-
-    called = {"injected": False}
-
-    def fake_inject(search_instance, pytubefix_filters):
-        called["injected"] = True
-
-    monkeypatch.setattr(adapter, "_inject_music_topic", fake_inject)
-
-    asyncio.run(adapter.search("foo", limit=5, live=True))
-    assert called["injected"] is False
-
-
-def test_inject_music_topic_overwrites_filter() -> None:
-    """`_inject_music_topic` rebuilds and overwrites `search_instance.filter`."""
-    from app.adapters.youtube import _inject_music_topic
-
-    class Stub:
-        filter = "ORIGINAL"
-
-    s = Stub()
-    _inject_music_topic(s, {"type": {2: 1}, "features": [{8: 1}]})
-    assert isinstance(s.filter, str)
-    assert s.filter != "ORIGINAL"
-    assert len(s.filter) > 0
-
-
-def test_inject_music_topic_handles_empty_filters() -> None:
-    """`_inject_music_topic` works even when pytubefix_filters is None."""
-    from app.adapters.youtube import _inject_music_topic
-
-    class Stub:
-        filter = None
-
-    s = Stub()
-    _inject_music_topic(s, None)
-    assert isinstance(s.filter, str)
-    assert len(s.filter) > 0
-
-
-def test_fetch_live_manifest_returns_info_when_url_present() -> None:
-    from app.adapters.youtube import LiveStreamInfo, _fetch_live_manifest
-
-    class FakeYouTube:
-        video_id = "abc12345678"
-        vid_info = {
-            "streamingData": {
-                "hlsManifestUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/x"
-            },
-            "videoDetails": {
-                "title": "Lofi Hip Hop Radio",
-                "author": "ChilledCow",
-                "channelId": "UCSJ4gkVC6NrvII8umztf0Ow",
-            },
-        }
-
-    import app.adapters.youtube as adapter
-    saved = adapter._make_youtube
-    try:
-        adapter._make_youtube = lambda vid: FakeYouTube()
-        info = _fetch_live_manifest("abc12345678")
-    finally:
-        adapter._make_youtube = saved
-
-    assert isinstance(info, LiveStreamInfo)
-    assert info.video_id == "abc12345678"
-    assert info.title == "Lofi Hip Hop Radio"
-    assert info.author == "ChilledCow"
-    assert info.channel_id == "UCSJ4gkVC6NrvII8umztf0Ow"
-    assert info.master_hls_url.startswith("https://manifest.googlevideo.com/")
-
-
-def test_fetch_live_manifest_returns_none_when_hls_url_missing() -> None:
-    from app.adapters.youtube import _fetch_live_manifest
-
-    class FakeYouTube:
-        video_id = "abc12345678"
-        vid_info = {
-            "streamingData": {},
-            "videoDetails": {"title": "t", "author": "a", "channelId": "c"},
-        }
-
-    import app.adapters.youtube as adapter
-    saved = adapter._make_youtube
-    try:
-        adapter._make_youtube = lambda vid: FakeYouTube()
-        assert _fetch_live_manifest("abc12345678") is None
-    finally:
-        adapter._make_youtube = saved
-
-
-def test_fetch_live_manifest_returns_none_on_exception() -> None:
-    from app.adapters.youtube import _fetch_live_manifest
-
-    def boom(vid):
-        raise RuntimeError("upstream is sad")
-
-    import app.adapters.youtube as adapter
-    saved = adapter._make_youtube
-    try:
-        adapter._make_youtube = boom
-        assert _fetch_live_manifest("abc12345678") is None
-    finally:
-        adapter._make_youtube = saved
-
-
-def test_resolve_live_master_url_returns_url_on_first_call(monkeypatch) -> None:
-    import asyncio
-
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import LiveStreamInfo
-
+async def test_resolve_live_master_url_returns_url_on_first_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
-        adapter, "_fetch_live_manifest",
-        lambda vid: LiveStreamInfo(
+        youtube, "_fetch_live_manifest",
+        lambda vid: youtube.LiveStreamInfo(
             video_id=vid, title="t", author="a", channel_id="c",
             thumbnail_url="x",
             master_hls_url="https://manifest.googlevideo.com/abc?expire=999999999",
         ),
     )
-    adapter._stream_url_cache.clear()
-    url = asyncio.run(adapter.resolve_live_master_url("vid12345678"))
+    url = await youtube.resolve_live_master_url("vid12345678")
     assert "manifest.googlevideo.com" in url
 
 
-def test_resolve_live_master_url_caches_result(monkeypatch) -> None:
-    import asyncio
-
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import LiveStreamInfo
-
+async def test_resolve_live_master_url_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"n": 0}
-    def fake_fetch(vid):
+
+    def fake_fetch(vid: str) -> youtube.LiveStreamInfo:
         calls["n"] += 1
-        return LiveStreamInfo(
+        return youtube.LiveStreamInfo(
             video_id=vid, title="t", author="a", channel_id="c",
             thumbnail_url="x",
             master_hls_url="https://manifest.googlevideo.com/abc?expire=999999999",
         )
 
-    monkeypatch.setattr(adapter, "_fetch_live_manifest", fake_fetch)
-    adapter._stream_url_cache.clear()
-    asyncio.run(adapter.resolve_live_master_url("vid12345678"))
-    asyncio.run(adapter.resolve_live_master_url("vid12345678"))
+    monkeypatch.setattr(youtube, "_fetch_live_manifest", fake_fetch)
+    await youtube.resolve_live_master_url("vid12345678")
+    await youtube.resolve_live_master_url("vid12345678")
     assert calls["n"] == 1
 
 
-def test_resolve_live_master_url_raises_when_fetch_returns_none(monkeypatch) -> None:
-    import asyncio
-
-    import pytest
-
-    import app.adapters.youtube as adapter
-
-    monkeypatch.setattr(adapter, "_fetch_live_manifest", lambda vid: None)
-    adapter._stream_url_cache.clear()
-    with pytest.raises(adapter.YouTubeError) as exc_info:
-        asyncio.run(adapter.resolve_live_master_url("vid12345678"))
+async def test_resolve_live_master_url_raises_when_fetch_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(youtube, "_fetch_live_manifest", lambda vid: None)
+    with pytest.raises(YouTubeError) as exc_info:
+        await youtube.resolve_live_master_url("vid12345678")
     assert exc_info.value.status == 502
     assert exc_info.value.code == "LIVE_UNAVAILABLE"
 
 
-def test_normalise_video_returns_live_video_details_when_live() -> None:
-    from pytubefix.exceptions import LiveStreamError
-
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import LiveStreamInfo, _normalise_video
-
-    class FakeYouTube:
-        video_id = "abc12345678"
-        @property
-        def length(self):
-            raise LiveStreamError(video_id="abc12345678")
-
-    saved = adapter._fetch_live_manifest
-    try:
-        adapter._fetch_live_manifest = lambda vid: LiveStreamInfo(
-            video_id=vid, title="Lofi Radio", author="ChilledCow",
-            channel_id="UC1", thumbnail_url=f"/proxy/thumbnail/{vid}",
-            master_hls_url="https://manifest.googlevideo.com/abc",
-        )
-        details = _normalise_video("abc12345678", FakeYouTube())
-    finally:
-        adapter._fetch_live_manifest = saved
-
-    assert details.is_live is True
-    assert details.live_stream_url == "/api/live/abc12345678/manifest.m3u8"
-    assert details.title == "Lofi Radio"
-    assert details.author == "ChilledCow"
-    assert details.audio_formats == []
-    assert details.video_formats == []
-    assert details.duration_seconds == 0
+# ---- channel() ----------------------------------------------------------------
 
 
-def test_normalise_video_raises_when_live_and_manifest_unavailable() -> None:
-    import pytest
-    from pytubefix.exceptions import LiveStreamError
-
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import _normalise_video
-
-    class FakeYouTube:
-        video_id = "abc12345678"
-        @property
-        def length(self):
-            raise LiveStreamError(video_id="abc12345678")
-
-    saved = adapter._fetch_live_manifest
-    try:
-        adapter._fetch_live_manifest = lambda vid: None
-        with pytest.raises(adapter.YouTubeError) as exc_info:
-            _normalise_video("abc12345678", FakeYouTube())
-        assert exc_info.value.status == 422
-        assert exc_info.value.code == "LIVE_NOT_SUPPORTED"
-    finally:
-        adapter._fetch_live_manifest = saved
+async def test_channel_maps_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, CHANNEL_INFO)
+    info = await youtube.channel("UCabc123")
+    assert isinstance(info, ChannelInfo)
+    assert info.channel_id == "UCabc123"
+    assert info.title == "Test Channel"
+    assert info.description == "channel description"
+    assert info.subscriber_count == 5000
+    # avatar_uncropped wins over the wider "banner" thumbnail.
+    assert info.thumbnail_url == "https://yt3.ggpht.com/avatar_uncropped.jpg"
 
 
-def test_normalise_video_detects_live_via_vid_info_without_exception() -> None:
-    """Some live videos don't raise LiveStreamError — vid_info.videoDetails.isLive
-    is the only signal. Prefer the live path in that case."""
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import LiveStreamInfo, _normalise_video
-
-    class FakeYouTube:
-        video_id = "abc12345678"
-        vid_info = {
-            "videoDetails": {"isLive": True, "title": "ignored", "author": "ignored"},
-            "streamingData": {"hlsManifestUrl": "https://manifest.googlevideo.com/x"},
-        }
-        # No exception on length — this is the "live but not LiveStreamError" case.
-        length = 0
-        title = "ignored"
-        author = "ignored"
-        channel_id = "ignored"
-        description = None
-        views = 0
-
-    saved = adapter._fetch_live_manifest
-    try:
-        adapter._fetch_live_manifest = lambda vid: LiveStreamInfo(
-            video_id=vid, title="Lofi Radio", author="ChilledCow",
-            channel_id="UC1", thumbnail_url=f"/proxy/thumbnail/{vid}",
-            master_hls_url="https://manifest.googlevideo.com/x",
-        )
-        details = _normalise_video("abc12345678", FakeYouTube())
-    finally:
-        adapter._fetch_live_manifest = saved
-
-    assert details.is_live is True
-    assert details.live_stream_url == "/api/live/abc12345678/manifest.m3u8"
-    assert details.title == "Lofi Radio"
-    assert details.audio_formats == []
+async def test_channel_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, CHANNEL_INFO)
+    await youtube.channel("UCabc123")
+    opts, url = FakeYDL.calls[0]
+    assert url == "https://www.youtube.com/channel/UCabc123"
+    assert opts["extract_flat"] == "in_playlist" and opts["playlistend"] == 1
 
 
-def test_normalise_video_falls_through_to_vod_when_is_live_false() -> None:
-    """vid_info.videoDetails.isLive=false → no upfront live dispatch; VOD path runs."""
-    import app.adapters.youtube as adapter
-    from app.adapters.youtube import _normalise_video
+# ---- playlist() -----------------------------------------------------------------
 
-    class FakeStream:
-        mime_type = "audio/mp4"
-        itag = 140
-        bitrate = 128000
-        url = "https://upstream.example/seg"
-        codecs = "mp4a.40.2"
-        sample_rate = 44100
-        channels = 2
-        type = "audio"
-        is_progressive = False
 
-    class FakeYouTube:
-        video_id = "abc12345678"
-        vid_info = {"videoDetails": {"isLive": False}}
-        length = 123
-        title = "Normal VOD"
-        author = "Some Author"
-        channel_id = "UC1"
-        description = "desc"
-        views = 1000
+async def test_playlist_maps_fields_and_skips_bad_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, PLAYLIST_INFO)
+    info = await youtube.playlist("PLxyz")
+    assert isinstance(info, PlaylistInfo)
+    assert info.playlist_id == "PLxyz"
+    assert info.title == "My Playlist"
+    assert info.author == "Curator"
+    assert info.video_count == 2  # from playlist_count, independent of items collected
+    assert len(info.items) == 1  # entries without id / non-dict entries are skipped
+    item = info.items[0]
+    assert (item.video_id, item.title, item.author, item.duration_seconds) == (
+        "vid1", "Item One", "Author", 60)
+    assert item.thumbnail_url == "https://i.ytimg.com/vi/vid1/hq720.jpg"  # widest thumbnail
 
-        @property
-        def streaming_data(self):
-            return None
 
-    # Avoid the full stream iteration path by stubbing _iter_streams.
-    saved_iter = adapter._iter_streams
-    try:
-        adapter._iter_streams = lambda yt: []
-        details = _normalise_video("abc12345678", FakeYouTube())
-    finally:
-        adapter._iter_streams = saved_iter
+async def test_playlist_falls_back_to_placeholder_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, PLAYLIST_MISSING_TITLE_INFO)
+    info = await youtube.playlist("PLbroken")
+    assert info.title == "Playlist PLbroken"
+    assert info.video_count == 0
+    assert info.items == []
 
-    assert details.is_live is False
-    assert details.title == "Normal VOD"
+
+# ---- search() through the adapter (cache + single-flight + sp) --------------
+
+
+@pytest.mark.parametrize(
+    ("category", "live"),
+    [(None, False), ("music", False), (None, True), ("music", True)],
+)
+async def test_search_caches_and_applies_sp(
+    monkeypatch: pytest.MonkeyPatch, category: str | None, live: bool,
+) -> None:
+    _install(monkeypatch, SEARCH_INFO)
+    hits1 = await youtube.search("q", 7, category=category, live=live)
+    hits2 = await youtube.search("q", 7, category=category, live=live)
+    assert [h.title for h in hits1] == [h.title for h in hits2]
+    assert len(FakeYDL.calls) == 1  # second call served from the search cache
+
+    opts, url = FakeYDL.calls[0]
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    expected_sp = build_search_sp(category=category, live=live)
+    if expected_sp is None:
+        assert "sp" not in qs
+    else:
+        assert qs["sp"] == [expected_sp]
+
+
+# ---- check_backend_requirements (deno) ---------------------------------------
+
+
+def test_requirement_check_warns_without_deno(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(youtube.shutil, "which", lambda name: None)
+    with caplog.at_level(logging.ERROR):
+        youtube.check_backend_requirements()
+    assert any(
+        "deno" in r.getMessage() for r in caplog.records if r.levelno == logging.ERROR
+    )
+
+
+def test_requirement_check_quiet_with_deno(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(youtube.shutil, "which", lambda name: "/usr/bin/deno")
+    with caplog.at_level(logging.ERROR):
+        youtube.check_backend_requirements()
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_lifespan_runs_requirement_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    ran: list[bool] = []
+    monkeypatch.setattr(youtube, "check_backend_requirements", lambda: ran.append(True))
+    with TestClient(create_app()):
+        pass
+    assert ran == [True]
+
+
+def test_ffmpeg_warning_is_debug_not_warning(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    ydl_logger = youtube._BASE_OPTS["logger"]
+    with caplog.at_level(logging.DEBUG, logger="hum.youtube"):
+        ydl_logger.warning("ffmpeg not found. The downloaded format may not be the best available.")
+        ydl_logger.warning("Signature solving failed")
+    levels = {r.getMessage(): r.levelno for r in caplog.records}
+    assert levels["yt-dlp: ffmpeg not found. The downloaded format may not be the best available."] == logging.DEBUG
+    assert levels["yt-dlp: Signature solving failed"] == logging.WARNING

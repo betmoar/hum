@@ -1,7 +1,12 @@
-"""The single boundary to pytubefix (and thus YouTube).
+"""The single boundary to yt-dlp (and thus YouTube).
 
 All other modules consume the normalised models in app.models. If YouTube
-changes its API shape or pytubefix's surface, the fix lives in this file.
+changes its API shape or yt-dlp's surface, the fix lives in this file.
+Raw CDN URLs never leave this module except into the server-side
+_stream_url_cache (invariant 3); clients only ever get /proxy/... paths.
+
+yt-dlp needs a JavaScript runtime (deno) for YouTube's signature/n
+challenges; see check_backend_requirements.
 """
 from __future__ import annotations
 
@@ -11,23 +16,13 @@ import re
 import shutil
 import time
 import urllib.parse
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
-from pytubefix import Channel, Playlist, Search, YouTube
-from pytubefix import exceptions as pytubefix_exceptions
+import yt_dlp
+from yt_dlp.utils import DownloadError, ExtractorError
 
-try:
-    from pytubefix.contrib.search import Filter as _SearchFilter
-except Exception:
-    _SearchFilter = None
-
-try:
-    from pytubefix.protobuf import encode_protobuf as _encode_protobuf
-except Exception:
-    _encode_protobuf = None
-
+from app.adapters.search_params import build_search_sp
 from app.config import get_settings
 from app.models import (
     AudioFormat,
@@ -46,14 +41,14 @@ logger = logging.getLogger("hum.youtube")
 _stream_url_cache: dict[tuple[Any, ...], tuple[str, float]] = {}
 
 # In-flight cache refreshes, keyed by video_id. Collapses concurrent cache-miss
-# refreshes of the same video onto a single pytubefix fetch. Self-cleaning:
+# refreshes of the same video onto a single yt-dlp extraction. Self-cleaning:
 # entries exist only while a refresh is running (popped in a finally), so this
 # never grows unbounded.
 _inflight_refresh: dict[str, asyncio.Task[None]] = {}
 
 # Cache TTL caps how long we trust an upstream URL beyond YouTube's own `expire=`.
-# Long enough to cover a typical listening session without forcing a pytubefix
-# re-fetch (which is expensive: HTTPS + Node cipher deobfuscation).
+# Long enough to cover a typical listening session without forcing a yt-dlp
+# re-extraction (expensive: ~2 s of HTTPS + deno challenge solving).
 _CACHE_MAX_TTL = 3600.0  # 1 hour
 
 # Cache: video_id -> (VideoDetails, expiry_epoch). Holds the canonical UNSIGNED
@@ -87,29 +82,6 @@ class YouTubeError(Exception):
         super().__init__(message)
 
 
-# pytubefix errors that mean "YouTube is refusing us", not "this video is gone".
-# Mapped to 503 so an operator can tell a blocking incident apart from dead links.
-_BLOCKED_ERROR_NAMES = frozenset(
-    {"BotDetection", "PoTokenRequired", "LoginRequired", "AgeCheckRequiredError",
-     "AgeCheckRequiredAccountError", "AgeRestrictedError", "SABRError"}
-)
-
-
-def _map_pytubefix_error(e: Exception) -> YouTubeError:
-    """Translate a pytubefix exception into a YouTubeError with a sane HTTP status.
-
-    Buckets:
-      - anti-bot / auth walls        -> 503 YOUTUBE_BLOCKED (operator: we are being blocked)
-      - VideoUnavailable subtree     -> 404 VIDEO_UNAVAILABLE (video gone/private/etc.)
-      - anything else from pytubefix -> 502 UPSTREAM_FAILURE (pytubefix broke / YouTube changed)
-    """
-    name = e.__class__.__name__
-    if name in _BLOCKED_ERROR_NAMES:
-        return YouTubeError(503, "YOUTUBE_BLOCKED", f"YouTube is blocking requests ({name})")
-    if isinstance(e, pytubefix_exceptions.VideoUnavailable):
-        return YouTubeError(404, "VIDEO_UNAVAILABLE", f"video unavailable ({name})")
-    return YouTubeError(502, "UPSTREAM_FAILURE", f"pytubefix failed ({name}: {e})")
-
 
 @dataclass(frozen=True)
 class LiveStreamInfo:
@@ -122,47 +94,128 @@ class LiveStreamInfo:
     master_hls_url: str
 
 
-# ---- Factory helpers (monkeypatchable for tests) -------------------------
+
+# ---- yt-dlp plumbing ------------------------------------------------------
 
 
-def _make_youtube(video_id: str) -> Any:
-    return YouTube(f"https://www.youtube.com/watch?v={video_id}")
+class _YdlLogger:
+    """Route yt-dlp's own output into Hum's logging. Without a logger it
+    prints ERROR lines to stderr even with quiet=True; the actual failure is
+    already surfaced as a mapped YouTubeError, so these are debug detail."""
+
+    def debug(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    def info(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    def warning(self, msg: str) -> None:
+        # Hum never downloads or merges formats, so a missing ffmpeg is
+        # irrelevant — yet yt-dlp warns about it on every extraction.
+        if "ffmpeg not found" in msg:
+            logger.debug("yt-dlp: %s", msg)
+            return
+        logger.warning("yt-dlp: %s", msg)
+
+    def error(self, msg: str) -> None:
+        logger.debug("yt-dlp error (raised as YouTubeError): %s", msg)
 
 
-def _make_search(query: str, *, filters: Any = None) -> Any:
-    if filters is not None:
-        return Search(query, filters=filters)
-    return Search(query)
+_BASE_OPTS: dict[str, Any] = {
+    "logger": _YdlLogger(),
+    "quiet": True,
+    "no_warnings": True,
+    "skip_download": True,
+    "noplaylist": True,
+    "noprogress": True,
+}
+
+# Flat listing: one page request, no per-entry player call. Used for search,
+# channel and playlist listings.
+_FLAT_OPTS: dict[str, Any] = {"extract_flat": "in_playlist"}
+
+# Substrings of yt-dlp error messages. yt-dlp errors are strings, not a
+# class hierarchy, so this is the mapping. New wording from YouTube → add a
+# marker here and a row in test_youtube_adapter.py::test_error_mapping.
+_BLOCKED_MARKERS = (
+    "sign in to confirm", "po token", "not a bot", "confirm your age", "age-restricted",
+)
+_UNAVAILABLE_MARKERS = (
+    "video unavailable", "video is unavailable", "private video", "has been removed",
+    "is not available", "account associated with this video has been terminated",
+    "does not exist",
+)
+
+_AUDIO_MIME = {"m4a": "audio/mp4", "mp4": "audio/mp4", "webm": "audio/webm"}
+_VIDEO_MIME = {"mp4": "video/mp4", "webm": "video/webm"}
 
 
-def _make_channel(channel_id: str) -> Any:
-    return Channel(f"https://www.youtube.com/channel/{channel_id}")
+def _make_ydl(opts: dict[str, Any]) -> Any:
+    """Factory seam for tests. A YoutubeDL instance is not thread-safe, so
+    every call builds its own (these run in asyncio.to_thread workers)."""
+    return yt_dlp.YoutubeDL(opts)
 
 
-def _make_playlist(playlist_id: str) -> Any:
-    return Playlist(f"https://www.youtube.com/playlist?list={playlist_id}")
+def _map_error(e: BaseException) -> YouTubeError:
+    """Translate a yt-dlp failure into a YouTubeError with a sane HTTP status.
+
+    Buckets:
+      - anti-bot / auth walls -> 503 YOUTUBE_BLOCKED (operator: we are being blocked)
+      - gone/private/removed  -> 404 VIDEO_UNAVAILABLE
+      - anything else         -> 502 UPSTREAM_FAILURE (yt-dlp broke / YouTube changed)
+    """
+    msg = str(e)
+    low = msg.lower()
+    if any(m in low for m in _BLOCKED_MARKERS):
+        return YouTubeError(503, "YOUTUBE_BLOCKED", f"YouTube is blocking requests (yt-dlp: {msg})")
+    if any(m in low for m in _UNAVAILABLE_MARKERS):
+        return YouTubeError(404, "VIDEO_UNAVAILABLE", f"video unavailable (yt-dlp: {msg})")
+    return YouTubeError(502, "UPSTREAM_FAILURE", f"yt-dlp failed ({type(e).__name__}: {msg})")
+
+
+def _extract(url: str, extra: dict[str, Any]) -> dict[str, Any]:
+    try:
+        with _make_ydl({**_BASE_OPTS, **extra}) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except YouTubeError:
+        raise
+    except (DownloadError, ExtractorError) as e:
+        raise _map_error(e) from e
+    except Exception as e:
+        # Anything else is yt-dlp breaking or YouTube changing shape: a mapped
+        # 502, never a bare 500 (the frontend's recovery keys off statuses).
+        raise _map_error(e) from e
+    if not isinstance(info, dict):
+        raise YouTubeError(502, "UPSTREAM_FAILURE", "yt-dlp returned no info")
+    return info
+
+
+def _int(v: Any) -> int | None:
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _kbps_to_bps(v: Any) -> int:
+    try:
+        return int(round(float(v) * 1000))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _author(info: dict[str, Any]) -> str | None:
+    for key in ("channel", "uploader", "creator"):
+        v = info.get(key)
+        if isinstance(v, str) and v:
+            return v
+    return None
+
 
 
 # ---- Public API ----------------------------------------------------------
-
-
-_T = TypeVar("_T")
-
-
-async def _to_thread_mapped(fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
-    """asyncio.to_thread with pytubefix exceptions translated to YouTubeError.
-
-    Every pytubefix call MUST go through this (or swallow errors itself, like
-    `_fetch_live_manifest`). A raw PytubeFixError escaping the adapter turns
-    into a 500 at the route layer; YouTubeError turns into a clean 4xx/5xx via
-    the global handler in app.main.
-    """
-    try:
-        return await asyncio.to_thread(fn, *args, **kwargs)
-    except YouTubeError:
-        raise
-    except pytubefix_exceptions.PytubeFixError as e:
-        raise _map_pytubefix_error(e) from e
 
 
 async def search(
@@ -181,7 +234,7 @@ async def search(
         return list(cached[0])
     # Single-flight, same shape and rationale as video(): concurrent identical
     # queries (two tabs, a retry after a slow response) collapse onto one
-    # pytubefix fetch instead of stampeding.
+    # yt-dlp extraction instead of stampeding.
     task = _inflight_search.get(cache_key)
     if task is None:
         task = asyncio.create_task(_run_search(query, limit, category=category, live=live,
@@ -201,30 +254,11 @@ async def _run_search(
     live: bool,
     cache_key: tuple[str, str | None, bool, int],
 ) -> list[SearchHit]:
-    """The uncached search fetch. Split out of search() so the whole two-step
-    fetch runs inside one single-flight task."""
-    if get_settings().yt_backend == "ytdlp":
-        from app.adapters import youtube_ytdlp
-        from app.adapters.search_params import build_search_sp
-
-        sp = build_search_sp(category=category, live=live)
-        hits = await asyncio.to_thread(youtube_ytdlp.search_hits, query, limit, sp)
-        _store_search_hits(hits, cache_key)
-        return hits
-    raw_filters = _build_search_filters(category=category, live=live)
-    pytubefix_filters: dict[str, Any] | None = None
-    wants_music = False
-    if raw_filters is not None:
-        wants_music = raw_filters.pop("_music_topic", False)
-        pytubefix_filters = raw_filters if raw_filters else None
-    s = await _to_thread_mapped(_make_search, query, filters=pytubefix_filters)
-    if wants_music:
-        # pytubefix's `Search.__init__` doesn't accept an `sp` kwarg; the encoded
-        # filter protobuf lives on `s.filter` and is read at request time. Rebuild
-        # it with the music-topic field merged in. On encoder failure, leave
-        # `s.filter` untouched so the search degrades to type=Video + features.
-        _inject_music_topic(s, pytubefix_filters)
-    return await _to_thread_mapped(_collect_and_cache_search, s, limit, cache_key)
+    """The uncached search fetch, run inside search()'s single-flight task."""
+    sp = build_search_sp(category=category, live=live)
+    hits = await asyncio.to_thread(_search_hits, query, limit, sp)
+    _store_search_hits(hits, cache_key)
+    return hits
 
 
 def _release_inflight(registry: dict[Any, Any], task: asyncio.Task[Any]) -> None:
@@ -263,7 +297,7 @@ async def video(video_id: str) -> VideoDetails:
     # .get() and the assignment), mirroring _refresh_cache_once.
     task = _inflight_video.get(video_id)
     if task is None:
-        task = asyncio.create_task(_to_thread_mapped(_fetch_video_cached, video_id))
+        task = asyncio.create_task(asyncio.to_thread(_fetch_video_cached, video_id))
         _inflight_video[video_id] = task
         # Only the creator clears the entry — a joiner popping it would let a
         # later caller start a second fetch while this one is still running.
@@ -282,23 +316,23 @@ _EJS_WIKI_URL = "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
 
 
 def check_backend_requirements() -> None:
-    """Startup check (app.main lifespan). The yt-dlp backend needs a JS
-    runtime for YouTube; without one it degrades (formats missing) or fails.
-    Logs loudly and keeps serving — failures then surface per request as the
-    usual mapped 502/503, never a crashed app."""
-    if get_settings().yt_backend == "ytdlp" and shutil.which("deno") is None:
+    """Startup check (app.main lifespan). yt-dlp needs a JS runtime for
+    YouTube; without one it degrades (formats missing) or fails. Logs loudly
+    and keeps serving — failures then surface per request as the usual mapped
+    502/503, never a crashed app."""
+    if shutil.which("deno") is None:
         logger.error(
-            "YT_BACKEND=ytdlp but the deno JavaScript runtime is not on PATH; "
-            "YouTube extraction will degrade or fail. Install deno: %s", _EJS_WIKI_URL,
+            "the deno JavaScript runtime is not on PATH; yt-dlp's YouTube "
+            "extraction will degrade or fail. Install deno: %s", _EJS_WIKI_URL,
         )
 
 
 async def channel(channel_id: str) -> ChannelInfo:
-    return await _to_thread_mapped(_fetch_channel, channel_id)
+    return await asyncio.to_thread(_fetch_channel, channel_id)
 
 
 async def playlist(playlist_id: str) -> PlaylistInfo:
-    return await _to_thread_mapped(_fetch_playlist, playlist_id)
+    return await asyncio.to_thread(_fetch_playlist, playlist_id)
 
 
 async def resolve_upstream_url(video_id: str, itag: int) -> str:
@@ -311,7 +345,7 @@ async def resolve_upstream_url(video_id: str, itag: int) -> str:
     if cached and cached[1] > now:
         return cached[0]
     # Cache miss — refresh off-thread (so the event loop isn't blocked by
-    # Node-cipher work) and de-duplicated, so concurrent misses for the same
+    # deno challenge solving) and de-duplicated, so concurrent misses for the same
     # video don't each fire a redundant fetch.
     await _refresh_cache_once(video_id)
     cached = _stream_url_cache.get((video_id, itag))
@@ -368,7 +402,7 @@ async def _refresh_cache_once(video_id: str) -> None:
     """Run _refresh_cache(video_id) under single-flight.
 
     Concurrent callers for the same video await one shared task instead of each
-    firing a redundant (expensive) pytubefix fetch. The check-and-create below
+    firing a redundant (expensive) yt-dlp extraction. The check-and-create below
     is atomic within the event loop — there is no await between the .get() and
     the assignment — so two coroutines cannot both create a task for the same id.
     """
@@ -376,7 +410,7 @@ async def _refresh_cache_once(video_id: str) -> None:
     if task is not None:
         await task
         return
-    task = asyncio.create_task(_to_thread_mapped(_refresh_cache, video_id))
+    task = asyncio.create_task(asyncio.to_thread(_refresh_cache, video_id))
     _inflight_refresh[video_id] = task
     try:
         await task
@@ -388,20 +422,76 @@ async def _refresh_cache_once(video_id: str) -> None:
 
 
 def _fetch_video(video_id: str) -> VideoDetails:
-    # Backend dispatch lives here so the metadata cache, single-flight and the
-    # stream-URL refresh (_refresh_cache) all go through the same backend.
-    # Lazy import: youtube_ytdlp imports helpers from this module.
-    if get_settings().yt_backend == "ytdlp":
-        from app.adapters import youtube_ytdlp
+    """Thread-bound (call via asyncio.to_thread). Writes the stream cache."""
+    info = _extract(f"https://www.youtube.com/watch?v={video_id}", {})
+    if info.get("live_status") == "is_live":
+        # The client only ever gets the /api/live route; the master URL is
+        # resolved server-side by resolve_live_master_url.
+        return _live_video_details(video_id, _live_info(video_id, info))
 
-        return youtube_ytdlp.fetch_video(video_id)
-    yt = _make_youtube(video_id)
-    return _normalise_video(video_id, yt)
+    audio: list[AudioFormat] = []
+    video: list[VideoFormat] = []
+    seen: set[int] = set()
+    now = time.time()
+    for f in info.get("formats") or []:
+        if not isinstance(f, dict):
+            continue
+        # Direct progressive/DASH URLs only; manifests and storyboards are not
+        # proxyable byte streams. Non-numeric ids ("140-drc", "sb0") are
+        # variants we don't expose.
+        if f.get("protocol") not in ("https", "http"):
+            continue
+        fid = str(f.get("format_id") or "")
+        url = f.get("url")
+        if not fid.isdigit() or not isinstance(url, str) or not url:
+            continue
+        itag = int(fid)
+        if itag in seen:
+            continue  # first occurrence wins (yt-dlp may list one itag per client)
+        seen.add(itag)
+        vcodec = str(f.get("vcodec") or "none")
+        acodec = str(f.get("acodec") or "none")
+        ext = str(f.get("ext") or "")
+        if vcodec == "none" and acodec != "none":
+            mime = f'{_AUDIO_MIME.get(ext, "audio/" + ext)}; codecs="{acodec}"'
+            audio.append(AudioFormat(
+                itag=itag, mime_type=mime, bitrate=_kbps_to_bps(f.get("abr") or f.get("tbr")),
+                codec=_extract_codec(mime), sample_rate=_int(f.get("asr")),
+                channels=_int(f.get("audio_channels")), url=_proxy_path_for(video_id, itag, mime),
+            ))
+        elif vcodec != "none":
+            codecs = vcodec if acodec == "none" else f"{vcodec}, {acodec}"
+            mime = f'{_VIDEO_MIME.get(ext, "video/" + ext)}; codecs="{codecs}"'
+            video.append(VideoFormat(
+                itag=itag, mime_type=mime, bitrate=_kbps_to_bps(f.get("tbr")),
+                codec=_extract_codec(mime), width=_int(f.get("width")) or 0,
+                height=_int(f.get("height")) or 0, fps=_int(f.get("fps")),
+                has_audio=acodec != "none", url=_proxy_path_for(video_id, itag, mime),
+            ))
+        else:
+            continue
+        # Trust YouTube's `expire=`, clamp to _CACHE_MAX_TTL (CLAUDE.md landmine).
+        expiry = min(_url_expire_epoch(url, now=now), now + _CACHE_MAX_TTL)
+        _stream_url_cache[(video_id, itag)] = (url, expiry)
+
+    return VideoDetails(
+        video_id=video_id,
+        title=str(info.get("title") or ""),
+        description=info.get("description") if isinstance(info.get("description"), str) else None,
+        author=_author(info) or "",
+        channel_id=str(info.get("channel_id") or ""),
+        duration_seconds=_int(info.get("duration")) or 0,
+        view_count=_int(info.get("view_count")),
+        thumbnail_url=f"/proxy/thumbnail/{video_id}",
+        audio_formats=audio,
+        video_formats=video,
+    )
+
 
 
 def _fetch_video_cached(video_id: str) -> VideoDetails:
     """_fetch_video plus the metadata-cache write. Runs in a to_thread worker
-    (construction + stream iteration touch network + Node-cipher work)."""
+    (yt-dlp extraction touches network + deno)."""
     details = _fetch_video(video_id)
     if not details.is_live:
         ttl = min(float(get_settings().video_cache_ttl_seconds), _CACHE_MAX_TTL)
@@ -413,41 +503,38 @@ def _fetch_video_cached(video_id: str) -> VideoDetails:
     return details
 
 
+def _live_info(video_id: str, info: dict[str, Any]) -> LiveStreamInfo:
+    """LiveStreamInfo from a yt-dlp info dict. master_hls_url is the HLS master
+    manifest shared by all of the info's m3u8 formats ("" when absent)."""
+    master = ""
+    for f in info.get("formats") or []:
+        if not isinstance(f, dict):
+            continue
+        url = f.get("manifest_url")
+        if f.get("protocol") in ("m3u8", "m3u8_native") and isinstance(url, str) and url:
+            master = url
+            break
+    return LiveStreamInfo(
+        video_id=video_id,
+        title=str(info.get("title") or ""),
+        author=_author(info) or "",
+        channel_id=str(info.get("channel_id") or ""),
+        thumbnail_url=f"/proxy/thumbnail/{video_id}",
+        master_hls_url=master,
+    )
+
+
 def _fetch_live_manifest(video_id: str) -> LiveStreamInfo | None:
-    """Read the live HLS manifest URL from pytubefix's vid_info, bypassing
-    `check_availability()` which raises `LiveStreamError` for live videos.
-
-    Returns None on any failure (missing key, network error, exception)
-    so callers can degrade rather than 500.
-    """
+    """Live master-manifest lookup. Returns None on any failure (not live,
+    no manifest, extraction error) so callers can degrade rather than 500."""
     try:
-        yt = _make_youtube(video_id)
-        vid_info = yt.vid_info
-        streaming = vid_info.get("streamingData", {}) or {}
-        master_url = streaming.get("hlsManifestUrl")
-        if not master_url:
-            return None
-        details = vid_info.get("videoDetails", {}) or {}
-        return LiveStreamInfo(
-            video_id=video_id,
-            title=str(details.get("title", "") or ""),
-            author=str(details.get("author", "") or ""),
-            channel_id=str(details.get("channelId", "") or ""),
-            thumbnail_url=f"/proxy/thumbnail/{video_id}",
-            master_hls_url=str(master_url),
-        )
-    except Exception:
+        info = _extract(f"https://www.youtube.com/watch?v={video_id}", {})
+    except YouTubeError:
         return None
-
-
-def _fetch_channel(channel_id: str) -> ChannelInfo:
-    ch = _make_channel(channel_id)
-    return _normalise_channel(channel_id, ch)
-
-
-def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
-    pl = _make_playlist(playlist_id)
-    return _normalise_playlist(playlist_id, pl)
+    if info.get("live_status") != "is_live":
+        return None
+    live = _live_info(video_id, info)
+    return live if live.master_hls_url else None
 
 
 def _refresh_cache(video_id: str) -> None:
@@ -489,49 +576,6 @@ def _evict_expired(now: float | None = None) -> None:
 # ---- Normalisation -------------------------------------------------------
 
 
-def _normalise_video(video_id: str, yt: Any) -> VideoDetails:
-    # Some live videos don't trigger LiveStreamError (pytubefix still returns
-    # iterable streams) but vid_info marks them as currently broadcasting and
-    # exposes an hlsManifestUrl. Prefer the live path in that case so we don't
-    # hand stale/fake VOD streams to the client.
-    if _is_currently_live(yt):
-        info = _fetch_live_manifest(video_id)
-        if info is not None:
-            return _live_video_details(video_id, info)
-        # Fall through to VOD path if no manifest — better than 422-ing.
-    try:
-        return _normalise_vod_video(video_id, yt)
-    except Exception as e:
-        # Detect pytubefix's LiveStreamError without importing it at top level
-        # (keeps test isolation; the exception class is checked by name).
-        if e.__class__.__name__ == "LiveStreamError":
-            info = _fetch_live_manifest(video_id)
-            if info is None:
-                raise YouTubeError(
-                    422, "LIVE_NOT_SUPPORTED",
-                    "Live stream metadata unavailable",
-                ) from e
-            return _live_video_details(video_id, info)
-        raise
-
-
-def _is_currently_live(yt: Any) -> bool:
-    """True when vid_info marks the video as actively broadcasting.
-
-    `isLive` is true only during an active broadcast; `isLiveContent` is true
-    for any live broadcast including finished ones — we only want the former.
-    We require the value to be a real bool so MagicMock-shaped test fixtures
-    don't accidentally take the live path.
-    """
-    try:
-        vid_info = yt.vid_info
-        details = vid_info.get("videoDetails", {}) or {}
-        value = details.get("isLive")
-        return value is True
-    except Exception:
-        return False
-
-
 def _live_video_details(video_id: str, info: LiveStreamInfo) -> VideoDetails:
     return VideoDetails(
         video_id=video_id,
@@ -549,157 +593,9 @@ def _live_video_details(video_id: str, info: LiveStreamInfo) -> VideoDetails:
     )
 
 
-def _normalise_vod_video(video_id: str, yt: Any) -> VideoDetails:
-    audio_formats: list[AudioFormat] = []
-    video_formats: list[VideoFormat] = []
-
-    now = time.time()
-    for s in _iter_streams(yt):
-        url, itag = _cache_stream(video_id, s, now=now)
-        if not url or not itag:
-            continue
-        mime = str(getattr(s, "mime_type", "") or "")
-
-        af = _stream_to_audio_format(s, video_id, itag=itag, mime=mime)
-        if af:
-            audio_formats.append(af)
-            continue
-
-        vf = _stream_to_video_format(s, video_id, itag=itag, mime=mime)
-        if vf:
-            video_formats.append(vf)
-
-    return VideoDetails(
-        video_id=video_id,
-        title=str(getattr(yt, "title", "") or ""),
-        description=_safe_str(getattr(yt, "description", None)),
-        author=str(getattr(yt, "author", "") or ""),
-        channel_id=str(getattr(yt, "channel_id", "") or ""),
-        duration_seconds=int(getattr(yt, "length", 0) or 0),
-        view_count=_safe_int(getattr(yt, "views", None)),
-        thumbnail_url=f"/proxy/thumbnail/{video_id}",
-        audio_formats=audio_formats,
-        video_formats=video_formats,
-    )
-
-
-def _cache_stream(video_id: str, s: Any, *, now: float | None = None) -> tuple[str | None, int]:
-    """Extract URL and itag from a pytubefix stream, writing to the cache.
-
-    Returns (url, itag). Both are falsy when the stream is unusable.
-    """
-    url = getattr(s, "url", None)
-    itag = int(getattr(s, "itag", 0) or 0)
-    if url and itag:
-        _now = now if now is not None else time.time()
-        expiry = min(_url_expire_epoch(url, now=_now), _now + _CACHE_MAX_TTL)
-        _stream_url_cache[(video_id, itag)] = (url, expiry)
-    return url, itag
-
-
-def _stream_to_audio_format(
-    s: Any, video_id: str, *, itag: int, mime: str
-) -> AudioFormat | None:
-    """Build an AudioFormat from a pytubefix stream, or None if not audio."""
-    if not mime.startswith("audio/"):
-        return None
-    return AudioFormat(
-        itag=itag,
-        mime_type=mime,
-        bitrate=int(getattr(s, "bitrate", 0) or 0),
-        codec=_extract_codec(mime),
-        sample_rate=_safe_int(getattr(s, "audio_sample_rate", None)),
-        channels=None,
-        url=_proxy_path_for(video_id, itag, mime),
-    )
-
-
-def _stream_to_video_format(
-    s: Any, video_id: str, *, itag: int, mime: str
-) -> VideoFormat | None:
-    """Build a VideoFormat from a pytubefix stream, or None if not video."""
-    if not mime.startswith("video/"):
-        return None
-    return VideoFormat(
-        itag=itag,
-        mime_type=mime,
-        bitrate=int(getattr(s, "bitrate", 0) or 0),
-        codec=_extract_codec(mime),
-        width=int(getattr(s, "width", 0) or 0),
-        height=int(getattr(s, "height", 0) or 0),
-        fps=_safe_int(getattr(s, "fps", None)),
-        has_audio=bool(getattr(s, "includes_audio_track", False)),
-        url=_proxy_path_for(video_id, itag, mime),
-    )
-
-
-def _iter_streams(yt: Any) -> Any:
-    try:
-        streams = getattr(yt, "streams", None)
-        if streams is None:
-            return iter([])
-        return iter(streams)
-    except TypeError:
-        # `streams` isn't directly iterable but may be list-able. Reuse the
-        # already-resolved value rather than re-accessing the (potentially
-        # lazy, network-touching) property a second time.
-        try:
-            return iter(list(streams or []))
-        except Exception:
-            logger.debug("streams not iterable for %r; yielding none", yt, exc_info=True)
-            return iter([])
-    except Exception:
-        # Catch pytubefix errors like LiveStreamError, MembersOnly, VideoUnavailable.
-        # Log at debug so operators can diagnose pytubefix breakage without noise.
-        logger.debug("stream enumeration failed; yielding none", exc_info=True)
-        return iter([])
-
-
-def _collect_search_hits(s: Any, limit: int) -> list[SearchHit]:
-    """Collect up to `limit` SearchHits across pytubefix's video/channel/playlist results.
-
-    Each pytubefix item is lazy — accessing .title / .author / etc. triggers a
-    network call and can raise VideoUnavailable, MembersOnly, etc. We skip any
-    item whose conversion raises so a single dead video doesn't 500 the whole search.
-    """
-    hits: list[SearchHit] = []
-    for v in _safe_iter(getattr(s, "videos", None)):
-        hit = _safe_call(_hit_from_pytube_video, v)
-        if hit:
-            hits.append(hit)
-            if len(hits) >= limit:
-                return hits
-    for c in _safe_iter(getattr(s, "channels", None)):
-        hit = _safe_call(_hit_from_pytube_channel, c)
-        if hit:
-            hits.append(hit)
-            if len(hits) >= limit:
-                return hits
-    for p in _safe_iter(getattr(s, "playlists", None)):
-        hit = _safe_call(_hit_from_pytube_playlist, p)
-        if hit:
-            hits.append(hit)
-            if len(hits) >= limit:
-                return hits
-    return hits
-
-
-def _collect_and_cache_search(
-    s: Any, limit: int, cache_key: tuple[str, str | None, bool, int]
-) -> list[SearchHit]:
-    """_collect_search_hits plus the search-cache write and an eviction sweep.
-
-    Runs in a to_thread worker (hit collection is the network-lazy part).
-    The sweep runs HERE because a search-only session never reaches
-    _refresh_cache — without it the search cache would grow unbounded.
-    """
-    hits = _collect_search_hits(s, limit)
-    _store_search_hits(hits, cache_key)
-    return hits
-
-
 def _store_search_hits(hits: list[SearchHit], cache_key: tuple[str, str | None, bool, int]) -> None:
-    """Search-cache write + eviction sweep, shared by both backends."""
+    """Search-cache write + eviction sweep. Runs in the to_thread worker: the
+    sweep runs HERE because a search-only session never reaches _refresh_cache."""
     # Clamped like the video-metadata TTL: an operator-set value is defence in
     # depth away from serving hours-stale search results.
     ttl = min(float(get_settings().search_cache_ttl_seconds), _CACHE_MAX_TTL)
@@ -707,166 +603,119 @@ def _store_search_hits(hits: list[SearchHit], cache_key: tuple[str, str | None, 
     _evict_expired()
 
 
-def _safe_call(fn: Any, arg: Any) -> Any:
-    """Call fn(arg); return None on ANY exception (including pytubefix unavailability errors)."""
-    try:
-        return fn(arg)
-    except Exception:
+def _best_thumb(thumbs: Any, *, prefer_id: str | None = None) -> str | None:
+    """Pick a thumbnail URL from a yt-dlp `thumbnails` list: the entry with id
+    `prefer_id` if present, else the widest, else the last."""
+    if not isinstance(thumbs, list):
         return None
+    good = [t for t in thumbs if isinstance(t, dict) and isinstance(t.get("url"), str) and t["url"]]
+    if not good:
+        return None
+    if prefer_id is not None:
+        for t in good:
+            if t.get("id") == prefer_id:
+                return str(t["url"])
+    best = max(good, key=lambda t: _int(t.get("width")) or 0)
+    url = str(best["url"])
+    return "https:" + url if url.startswith("//") else url
 
 
-def _safe_get(obj: Any, name: str, default: Any = None) -> Any:
-    """Read obj.<name> defensively. Returns default if the attribute access raises
-    (pytubefix's lazy properties can throw, not just be missing)."""
-    try:
-        return getattr(obj, name, default)
-    except Exception:
-        return default
-
-
-def _hit_from_pytube_video(v: Any) -> SearchHit:
-    return SearchHit(
-        kind="video",
-        id=str(_safe_get(v, "video_id", "")),
-        title=str(_safe_get(v, "title", "") or ""),
-        author=_safe_str(_safe_get(v, "author", None)),
-        thumbnail_url=str(_safe_get(v, "thumbnail_url", "") or ""),
-        duration_seconds=_safe_int(_safe_get(v, "length", None)),
-        is_live=_safe_bool(_safe_get(v, "is_live", None)),
-    )
-
-
-def _hit_from_pytube_channel(c: Any) -> SearchHit:
-    return SearchHit(
-        kind="channel",
-        id=str(_safe_get(c, "channel_id", "") or ""),
-        title=str(_safe_get(c, "channel_name", "") or ""),
-        thumbnail_url=_safe_str(_safe_get(c, "thumbnail_url", None)) or "",
-    )
-
-
-def _hit_from_pytube_playlist(p: Any) -> SearchHit:
-    return SearchHit(
-        kind="playlist",
-        id=str(_safe_get(p, "playlist_id", "") or ""),
-        title=_safe_str(_safe_get(p, "title", None)) or "",
-        author=_safe_str(_safe_get(p, "owner", None)),
-        thumbnail_url="",
-        video_count=_safe_int(_safe_get(p, "length", None)),
-    )
-
-
-def _normalise_channel(channel_id: str, ch: Any) -> ChannelInfo:
-    # pytubefix doesn't reliably expose subscriber_count or thumbnail_url as
-    # top-level attributes — they require digging into initial_data. We accept
-    # the trade-off and leave them None / empty rather than maintaining a
-    # parallel scraper. If you really need them, extract from ch.initial_data
-    # at call time.
+def _fetch_channel(channel_id: str) -> ChannelInfo:
+    # playlistend=1: we only need the channel's own metadata, not its tabs.
+    info = _extract(f"https://www.youtube.com/channel/{channel_id}",
+                    {**_FLAT_OPTS, "playlistend": 1})
     return ChannelInfo(
-        channel_id=str(getattr(ch, "channel_id", channel_id) or channel_id),
-        title=str(getattr(ch, "channel_name", "") or ""),
-        description=_safe_str(getattr(ch, "description", None)),
-        subscriber_count=None,
-        thumbnail_url=_extract_channel_thumbnail(ch) or "",
+        channel_id=str(info.get("channel_id") or info.get("id") or channel_id),
+        title=str(info.get("channel") or info.get("title") or ""),
+        description=info.get("description") if isinstance(info.get("description"), str) else None,
+        subscriber_count=_int(info.get("channel_follower_count")),
+        thumbnail_url=_best_thumb(info.get("thumbnails"), prefer_id="avatar_uncropped") or "",
     )
 
 
-def _extract_channel_thumbnail(ch: Any) -> str | None:
-    """Best-effort extract the highest-resolution avatar from pytubefix initial_data."""
-    try:
-        data = getattr(ch, "initial_data", None) or {}
-        header = (
-            data.get("header", {}).get("c4TabbedHeaderRenderer")
-            or data.get("header", {}).get("pageHeaderRenderer")
-            or {}
-        )
-        thumbs = (header.get("avatar") or {}).get("thumbnails") or []
-        if thumbs:
-            return str(max(thumbs, key=lambda t: int(t.get("width", 0))).get("url", ""))
-        meta_thumbs = (
-            data.get("metadata", {}).get("channelMetadataRenderer", {}).get("avatar", {}).get(
-                "thumbnails", []
-            )
-        )
-        if meta_thumbs:
-            return str(meta_thumbs[0].get("url", ""))
-    except Exception:
-        return None
-    return None
-
-
-def _normalise_playlist(playlist_id: str, pl: Any) -> PlaylistInfo:
-    title = _safe_str(_safe_get(pl, "title")) or f"Playlist {playlist_id}"
-    length = _safe_int(_safe_get(pl, "length")) or 0
-    owner = _safe_str(_safe_get(pl, "owner"))
-
+def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
+    info = _extract(f"https://www.youtube.com/playlist?list={playlist_id}", _FLAT_OPTS)
     items: list[PlaylistItem] = []
-    for v in _safe_iter(_safe_get(pl, "videos")):
-        item = _safe_call(_playlist_item_from_video, v)
-        if item:
-            items.append(item)
-
+    for entry in info.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        vid = entry.get("id")
+        if not isinstance(vid, str) or not vid:
+            continue
+        items.append(PlaylistItem(
+            video_id=vid,
+            title=str(entry.get("title") or ""),
+            author=_author(entry),
+            duration_seconds=_int(entry.get("duration")),
+            thumbnail_url=_best_thumb(entry.get("thumbnails")) or "",
+        ))
     return PlaylistInfo(
         playlist_id=playlist_id,
-        title=title,
-        author=owner,
-        video_count=length or len(items),
+        title=str(info.get("title") or "") or f"Playlist {playlist_id}",
+        author=_author(info),
+        video_count=_int(info.get("playlist_count")) or len(items),
         items=items,
     )
 
 
-def _playlist_item_from_video(v: Any) -> PlaylistItem | None:
-    """Convert a single pytubefix video to a PlaylistItem, or None if unusable."""
-    vid = _safe_get(v, "video_id")
-    if not vid:
-        return None
-    return PlaylistItem(
-        video_id=str(vid),
-        title=str(_safe_get(v, "title", "") or ""),
-        author=_safe_str(_safe_get(v, "author")),
-        duration_seconds=_safe_int(_safe_get(v, "length")),
-        thumbnail_url=str(_safe_get(v, "thumbnail_url", "") or ""),
-    )
+def _thumb(entry: dict[str, Any]) -> str | None:
+    thumbs = entry.get("thumbnails")
+    if isinstance(thumbs, list):
+        for t in reversed(thumbs):
+            u = t.get("url") if isinstance(t, dict) else None
+            if isinstance(u, str) and u:
+                return "https:" + u if u.startswith("//") else u
+    return None
 
+
+def _hit(entry: Any) -> SearchHit | None:
+    if not isinstance(entry, dict):
+        return None
+    eid = entry.get("id")
+    if not isinstance(eid, str) or not eid:
+        return None
+    url = str(entry.get("url") or "")
+    title = str(entry.get("title") or "")
+    if entry.get("ie_key") == "Youtube":
+        return SearchHit(
+            kind="video", id=eid, title=title, author=_author(entry),
+            # Search-grid thumbnails stay raw i.ytimg.com URLs (CLAUDE.md landmine).
+            thumbnail_url=_thumb(entry) or f"https://i.ytimg.com/vi/{eid}/hqdefault.jpg",
+            duration_seconds=_int(entry.get("duration")),
+            is_live=True if entry.get("live_status") == "is_live" else None,
+        )
+    if "list=" in url:
+        return SearchHit(
+            kind="playlist", id=eid, title=title, author=_author(entry),
+            thumbnail_url=_thumb(entry) or "", video_count=_int(entry.get("playlist_count")),
+        )
+    if "/channel/" in url or "/@" in url:
+        return SearchHit(kind="channel", id=eid, title=title, thumbnail_url=_thumb(entry) or "")
+    return None
+
+
+def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
+    """Thread-bound. One flat results-page extraction: title, channel and
+    duration come from the search response itself (no per-hit player call)."""
+    params = {"search_query": query}
+    if sp:
+        params["sp"] = sp
+    url = "https://www.youtube.com/results?" + urllib.parse.urlencode(params)
+    info = _extract(url, {"extract_flat": "in_playlist", "playlistend": limit})
+    hits: list[SearchHit] = []
+    for entry in info.get("entries") or []:
+        try:
+            hit = _hit(entry)
+        except Exception:
+            logger.debug("skipping malformed yt-dlp search entry", exc_info=True)
+            continue
+        if hit is not None:
+            hits.append(hit)
+            if len(hits) >= limit:
+                break
+    return hits
 
 # ---- Helpers -------------------------------------------------------------
-
-
-def _safe_iter(obj: Any) -> Any:
-    """Iterate obj if possible; otherwise return empty iterator. Swallows pytubefix errors."""
-    if obj is None:
-        return iter([])
-    try:
-        return iter(obj)
-    except Exception:
-        return iter([])
-
-
-def _safe_str(v: Any) -> str | None:
-    try:
-        if v is None:
-            return None
-        return str(v)
-    except Exception:
-        return None
-
-
-def _safe_int(v: Any) -> int | None:
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_bool(v: Any) -> bool | None:
-    if v is None:
-        return None
-    try:
-        return bool(v)
-    except Exception:
-        return None
 
 
 def _url_expire_epoch(url: str, *, now: float | None = None) -> float:
@@ -913,70 +762,3 @@ def _proxy_path_for(video_id: str, itag: int, mime: str) -> str:
     return f"{base}/{video_id}?itag={itag}"
 
 
-def _build_search_filters(*, category: str | None, live: bool) -> dict[str, Any] | None:
-    """Construct the pytubefix `filters` dict + sentinels for the given options.
-
-    Returns None when no filters are needed. The `_music_topic` sentinel
-    key is read (and stripped) by `search()` before passing to pytubefix.
-    """
-    if _SearchFilter is None:
-        return None
-    if not category and not live:
-        return None
-    out: dict[str, Any] = {"type": _SearchFilter.get_type("Video")}
-    if live:
-        out.setdefault("features", []).append(_SearchFilter.get_features("Live"))
-    if category == "music":
-        out["_music_topic"] = True
-    return out
-
-
-# YouTube's "Music" topic ID; used to narrow search to category=music.
-# This identifier is hard-coded into YouTube's UI and stable in practice,
-# but it is NOT a public API contract. If YouTube changes the topic id,
-# the music filter silently degrades to type=Video (see search()).
-_MUSIC_TOPIC_ID = "/m/04rlf"
-
-
-def _encode_music_topic_sp() -> str:
-    """Encode a stand-alone `sp=` protobuf for the Music topic.
-
-    Returns the encoded value, or "" on failure. Kept as a utility for
-    isolated testing of the encoder; production code goes through
-    `_inject_music_topic`, which merges the topic with any existing filters.
-    """
-    if _encode_protobuf is None:  # pragma: no cover — defensive import
-        return ""
-    try:
-        combined = {2: {19: _MUSIC_TOPIC_ID}}
-        return str(_encode_protobuf(str(combined)))
-    except Exception:
-        return ""
-
-
-def _inject_music_topic(search_instance: Any, pytubefix_filters: dict[str, Any] | None) -> None:
-    """Overwrite `search_instance.filter` with a protobuf that includes the music topic.
-
-    Mirrors pytubefix's `Filter.get_filters_params` shape: everything goes under
-    the root field `2`. We rebuild that nested dict from the same legacy filter
-    inputs pytubefix accepts, then merge field 19 (topic). Sorted for determinism.
-
-    On any failure (missing encoder, malformed input), leaves `s.filter` untouched
-    so the search proceeds with whatever pytubefix already computed.
-    """
-    if _encode_protobuf is None:  # pragma: no cover — defensive import
-        return
-    try:
-        inner: dict[int, Any] = {}
-        if pytubefix_filters:
-            for key in ("type", "duration", "upload_date"):
-                value = pytubefix_filters.get(key)
-                if value:
-                    inner.update(value)
-            for feature in pytubefix_filters.get("features", []) or []:
-                inner.update(feature)
-        inner[19] = _MUSIC_TOPIC_ID
-        combined = {2: dict(sorted(inner.items()))}
-        search_instance.filter = _encode_protobuf(str(combined))
-    except Exception:
-        return

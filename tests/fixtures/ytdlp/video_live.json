@@ -1,12 +1,12 @@
 {
- "id": "7NOSDKb0HlU",
- "title": "lofi hip hop radio - beats to study/relax to \ud83d\udc3e 2026-09-24 13:59",
- "channel": "Chillhop Music",
- "uploader": "Chillhop Music",
- "channel_id": "UCOxqgCwgOqC2lMqC5PYz_Dg",
- "view_count": 39824836,
+ "id": "4xDzrJKXOOY",
+ "title": "synthwave radio 🌌 beats to chill/game to 2026-09-24 14:24",
+ "channel": "Lofi Girl",
+ "uploader": "Lofi Girl",
+ "channel_id": "UCSJ4gkVC6NrvII8umztf0Ow",
+ "view_count": 69905840,
  "live_status": "is_live",
- "description": "We hope you enjoy these chill lofi hip hop tunes while studying / chilling / working. \u2665\n\n\ud83d\udc3e more lofi hip hop beats on Spotify & Apple Music \n\u30fb https://chillhop.ffm.to/lofihiphopbeats.FUP/spotify\n\u30fb htt",
+ "description": "🎼 | Listen on Spotify, Apple music and more\n→  https://fanlink.tv/ChillSynthwave\n\n🎶 | Subscribe to this channel for more synthwave music\n→  https://bit.ly/synthwave-channel\n\n🌎 | Lofi Girl on all socia",
  "formats": [
   {
    "format_id": "233",
@@ -15,8 +15,8 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=233&expire=1790274254"
   },
   {
    "format_id": "234",
@@ -25,22 +25,22 @@
    "vcodec": "none",
    "abr": null,
    "tbr": null,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=234&expire=1790274254"
   },
   {
    "format_id": "269",
    "ext": "mp4",
    "protocol": "m3u8_native",
-   "vcodec": "avc1.4D400C",
+   "vcodec": "avc1.42C00B",
    "acodec": "none",
    "abr": 0,
-   "tbr": 269.034,
+   "tbr": 290.288,
    "width": 256,
    "height": 144,
-   "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=0"
+   "fps": 15.0,
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=269&expire=1790274254"
   },
   {
    "format_id": "229",
@@ -49,12 +49,12 @@
    "vcodec": "avc1.4D4015",
    "acodec": "none",
    "abr": 0,
-   "tbr": 507.418,
+   "tbr": 546.239,
    "width": 426,
    "height": 240,
    "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=229&expire=1790274254"
   },
   {
    "format_id": "230",
@@ -63,12 +63,12 @@
    "vcodec": "avc1.4D401E",
    "acodec": "none",
    "abr": 0,
-   "tbr": 962.461,
+   "tbr": 1209.862,
    "width": 640,
    "height": 360,
    "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=230&expire=1790274254"
   },
   {
    "format_id": "231",
@@ -77,12 +77,12 @@
    "vcodec": "avc1.4D401F",
    "acodec": "none",
    "abr": 0,
-   "tbr": 1282.517,
+   "tbr": 1568.726,
    "width": 854,
    "height": 480,
    "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=231&expire=1790274254"
   },
   {
    "format_id": "232",
@@ -91,26 +91,26 @@
    "vcodec": "avc1.4D401F",
    "acodec": "none",
    "abr": 0,
-   "tbr": 2447.97,
+   "tbr": 2969.452,
    "width": 1280,
    "height": 720,
    "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=232&expire=1790274254"
   },
   {
    "format_id": "270",
    "ext": "mp4",
    "protocol": "m3u8_native",
-   "vcodec": "avc1.4D4028",
+   "vcodec": "avc1.640028",
    "acodec": "none",
    "abr": 0,
-   "tbr": 4561.186,
+   "tbr": 5420.722,
    "width": 1920,
    "height": 1080,
    "fps": 30.0,
-   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=0",
-   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=0"
+   "url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=1790274254",
+   "manifest_url": "https://rr1---sn.googlevideo.com/videoplayback?itag=270&expire=1790274254"
   }
  ]
 }

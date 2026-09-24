@@ -4,7 +4,7 @@ These lock in the three load-bearing rules from ARCHITECTURE.md plus the auth
 posture of the route table. If one of these fails you are probably about to
 break the design, not the test. Read docs/PLAYBOOKS.md before changing them.
 
-Invariant 1: pytubefix is imported in exactly one file (app/adapters/youtube.py).
+Invariant 1: yt_dlp is imported in exactly one file (app/adapters/youtube.py).
 Invariant 2: exactly one httpx.AsyncClient is constructed (app/adapters/upstream_http.py).
 Invariant 3: every route is protected — /api/* by bearer or signature, /proxy/*
              by signature — and URLs the adapter hands out are always relative
@@ -39,29 +39,16 @@ def _imports_of(path: Path) -> set[str]:
     return mods
 
 
-def test_invariant_1_pytubefix_only_in_the_adapter() -> None:
+def test_invariant_1_yt_dlp_only_in_the_adapter() -> None:
     offenders = [
         str(p.relative_to(APP_DIR))
         for p in _py_files()
-        if "pytubefix" in _imports_of(p) and p.name != "youtube.py"
+        if "yt_dlp" in _imports_of(p) and p.name != "youtube.py"
     ]
     assert not offenders, (
-        f"pytubefix imported outside app/adapters/youtube.py: {offenders}. "
-        "All YouTube access goes through the adapter so pytubefix breakage "
+        f"yt_dlp imported outside app/adapters/youtube.py: {offenders}. "
+        "All YouTube access goes through the adapter so extractor breakage "
         "stays a one-file fix."
-    )
-
-
-def test_invariant_1b_yt_dlp_only_in_its_adapter() -> None:
-    # Spike-scoped companion to invariant 1 (spike/ytdlp-backend): the yt-dlp
-    # backend is confined to one file for the same one-file-fix reason.
-    offenders = [
-        str(p.relative_to(APP_DIR))
-        for p in _py_files()
-        if "yt_dlp" in _imports_of(p) and p.name != "youtube_ytdlp.py"
-    ]
-    assert not offenders, (
-        f"yt_dlp imported outside app/adapters/youtube_ytdlp.py: {offenders}."
     )
 
 

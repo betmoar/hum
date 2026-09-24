@@ -15,7 +15,7 @@ Lean self-hosted YouTube proxy + lightweight Svelte 5 frontend. Single process, 
 │ (Svelte 5)  │ ◀─── signed URL ─── │   Backend   │
 └─────────────┘                     └─────┬───────┘
        │                                  │
-       │ <audio src="signed URL">         │ pytubefix.YouTube(...)
+       │ <audio src="signed URL">         │ yt_dlp.YoutubeDL(...)
        │                                  ▼
        │                            ┌─────────────┐
        └─── direct HTTPS (range) ──▶│ YouTube CDN │
@@ -31,7 +31,7 @@ In production both layers ship as one Docker image:
 
 Ports-and-adapters layout. Three load-bearing invariants:
 
-1. `pytubefix` is imported in exactly one file: [app/adapters/youtube.py](../app/adapters/youtube.py)
+1. `yt_dlp` is imported in exactly one file: [app/adapters/youtube.py](../app/adapters/youtube.py)
 2. Upstream HTTP goes through exactly one `httpx.AsyncClient` in [app/adapters/upstream_http.py](../app/adapters/upstream_http.py)
 3. Stream URLs handed to clients are **always** Blake3-HMAC-signed; raw YouTube CDN URLs never leave the proxy
 
@@ -45,7 +45,7 @@ app/
 ├── models.py             Pydantic response shapes
 ├── static.py             Mount frontend/dist/ at / with SPA fallback
 ├── adapters/
-│   ├── youtube.py        Only file that imports pytubefix
+│   ├── youtube.py        Only file that imports yt_dlp
 │   └── upstream_http.py  Shared httpx.AsyncClient + YouTube host allowlist
 ├── api/                  GET routes: search, video, channel, playlist
 └── proxy/                GET routes: audio, video, thumbnail + shared helpers
@@ -75,15 +75,28 @@ Why two layers: the bearer protects the JSON API. Signed URLs let us hand stream
 
 ### Upstream
 
-The adapter's `resolve_upstream_url(video_id, itag)` returns the YouTube CDN URL. Backed by a process-level in-memory cache `(video_id, itag) → (url, expiry_epoch)` with TTL = `min(YouTube's expire param, 1 hour)`. Cache misses fall through to a fresh `pytubefix.YouTube(...)` call wrapped in `asyncio.to_thread` so the event loop stays unblocked while Node runs the cipher deobfuscation.
+The adapter's `resolve_upstream_url(video_id, itag)` returns the YouTube CDN URL. Backed by a process-level in-memory cache `(video_id, itag) → (url, expiry_epoch)` with TTL = `min(YouTube's expire param, 1 hour)`. Cache misses fall through to a fresh yt-dlp extraction in `asyncio.to_thread` so the event loop stays unblocked while deno runs YouTube's JS challenge solver.
 
 The proxy routes open a streaming `httpx` response with `stream=True`, forward `Range` headers, strip hop-by-hop response headers (`Connection`, `Keep-Alive`, `Transfer-Encoding`, ...) plus `Set-Cookie`/`Server`/`Alt-Svc` to avoid leaking YouTube fingerprints, and pipe bytes back to the client via `aiter_bytes()`. The response is closed in a `finally` block in the body iterator.
 
-### Why pytubefix?
+### Why yt-dlp?
 
-An earlier version used the [`innertube`](https://github.com/tombulled/innertube) library. As of 2026 every `innertube` client type returns `UNPLAYABLE` or HTTP 400 for player calls — YouTube hardened against unauthenticated raw-InnerTube access. `pytubefix` bundles a Node binary (via `nodejs-wheel-binaries`) to handle JS-based cipher deobfuscation, which is currently the only way to extract working stream URLs without a full browser.
+An earlier version used the [`innertube`](https://github.com/tombulled/innertube) library. As of 2026 every `innertube` client type returns `UNPLAYABLE` or HTTP 400 for player calls — YouTube hardened against unauthenticated raw-InnerTube access. The next version used `pytubefix`, which bundled a Node binary for JS-based cipher deobfuscation.
 
-If pytubefix breaks (it eventually will), the fix lives in `app/adapters/youtube.py` only.
+Measured 2026-09-24: `pytubefix` was blocked on 14 of 15 playable ids (`YOUTUBE_BLOCKED`);
+`yt-dlp` played all 13 VODs plus 2 live streams, and search p50 dropped from 5.32 s to
+1.28 s with 90–100% titled hits (was 0–5%, issue #14; cold video lookup ~2.3 s p50).
+`yt-dlp` replaced `pytubefix` entirely — video details, search, channel, playlist, and
+the live HLS master manifest all go through it now. Full measurement: see
+[docs/dev/ytdlp-spike-report.md](dev/ytdlp-spike-report.md).
+
+`yt-dlp` needs the deno JavaScript runtime on PATH to solve YouTube's challenges (the
+Docker image ships it via `denoland/deno:bin-2.9.7`); the app logs one ERROR at startup
+if deno is missing. The dependency is `yt-dlp[default]`, which pulls in `yt-dlp-ejs`
+(the challenge solver scripts) — without it extraction logs "n challenge solving
+failed".
+
+If yt-dlp breaks (it eventually will), the fix lives in `app/adapters/youtube.py` only.
 
 ## Frontend
 
@@ -188,7 +201,7 @@ docker run -p 8000:8000 --env-file .env hum
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Backend unit | `pytest tests/unit` | mocked pytubefix boundary; auth, config, range, models, routes, invariants |
+| Backend unit | `pytest tests/unit` | mocked yt-dlp boundary (`_make_ydl`); auth, config, range, models, routes, invariants |
 | Backend integration | `pytest -m integration` | 5 tests; hits real YouTube; opt-in |
 | Frontend unit + component | `cd frontend && npm test` | mocked fetch + adapter; runes, API, store, components |
 

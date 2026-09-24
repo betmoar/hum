@@ -6,32 +6,36 @@ people.
 
 ---
 
-## 1. pytubefix broke (YouTube changed something)
+## 1. yt-dlp broke (YouTube changed something)
 
 **Symptoms.** `/api/video` returns 502 `UPSTREAM_FAILURE` or 503 `YOUTUBE_BLOCKED`;
-logs show pytubefix exception names; the frontend toasts "Could not load this track."
+logs show a yt-dlp error string; the frontend toasts "Could not load this track."
 
 **Steps.**
 1. Confirm it's real, not one dead video:
    `uv run pytest -m integration` (5 tests against live YouTube).
 2. Read the error code in the JSON response:
    - `YOUTUBE_BLOCKED` (503) → YouTube is refusing this IP/client (bot detection,
-     po_token wall). Not a code bug. Options, in order: wait an hour (blocks are often
-     transient); update pytubefix (`uv lock --upgrade-package pytubefix && uv sync`);
-     enable pytubefix's po_token/oauth support inside `_make_youtube()` — and ONLY
-     there (invariant 1).
-   - `UPSTREAM_FAILURE` (502) → pytubefix itself crashed (YouTube changed a page
-     shape). Check https://github.com/JuanBindez/pytubefix/issues — someone hit it
-     first. Upgrade; if no release yet, pin to their fix branch temporarily and leave
-     a dated TODO.
+     JS challenge wall). Not a code bug. Options, in order: wait an hour (blocks are
+     often transient); check the deno version on PATH (`deno --version`) — yt-dlp's
+     challenge solver needs it; check the
+     [EJS wiki](https://github.com/yt-dlp/yt-dlp/wiki/EJS) for solver changes; update
+     yt-dlp (`uv lock --upgrade-package yt-dlp && uv sync --extra dev`).
+   - `UPSTREAM_FAILURE` (502) or `VIDEO_UNAVAILABLE` (404) → yt-dlp itself crashed or
+     returned an unrecognized error string (YouTube changed a page shape or wording).
+     Check the [yt-dlp issue tracker](https://github.com/yt-dlp/yt-dlp/issues) —
+     someone hit it first. Upgrade; if no release yet, pin to a fix commit temporarily
+     and leave a dated TODO.
 3. All changes go in `app/adapters/youtube.py`. If you feel the urge to touch another
    file, you're about to break invariant 1 — stop.
 4. `./scripts/check.sh backend`, then `uv run pytest -m integration` again.
 
 **Trap.** Do NOT catch broad exceptions in routes to "fix" a 500. The adapter maps
-pytubefix errors to `YouTubeError` (`_map_pytubefix_error`); the global handlers in
-`app/main.py` turn those into JSON. If a new pytubefix exception leaks as a 500, add
-it to the mapping in the adapter, not a try/except in a route.
+yt-dlp error strings to `YouTubeError` by substring marker (`_map_error`); the global
+handlers in `app/main.py` turn those into JSON. If a new yt-dlp error string leaks as
+a 500 or maps to the wrong status, add a marker to `_map_error` and a row to
+`test_error_mapping` in `tests/unit/test_youtube_adapter.py` — not a try/except in a
+route.
 
 ---
 
@@ -45,7 +49,7 @@ it to the mapping in the adapter, not a try/except in a route.
    template — length + regex at the model layer).
 4. Response shape: Pydantic model in `app/models.py`, then mirror it by hand in
    `frontend/src/lib/types.ts` (same field names, snake_case).
-5. Never call pytubefix or httpx directly — go through `app.adapters.youtube` /
+5. Never call yt_dlp or httpx directly — go through `app.adapters.youtube` /
    `app.adapters.upstream_http`. Let `YouTubeError` propagate; the global handlers
    format it.
 6. If the route adds a new top-level path prefix (not `/api/` or `/proxy/`), add it to
@@ -96,7 +100,7 @@ The cache in `app/adapters/youtube.py` is the highest-risk hot path. Rules:
   `_inflight_refresh` and storing the new task. Adding one reintroduces the duplicate
   concurrent-fetch bug it exists to prevent.
 - Expiry is `min(YouTube's expire=, now + _CACHE_MAX_TTL)`. Raising `_CACHE_MAX_TTL`
-  above 1 h trades fewer pytubefix calls for more mid-play 403s (YouTube invalidates
+  above 1 h trades fewer yt-dlp extractions for more mid-play 403s (YouTube invalidates
   URLs early on IP change).
 - After changing anything here run `tests/unit/test_youtube_adapter.py` — it encodes
   the stale-itag-eviction and single-flight semantics.
@@ -127,7 +131,7 @@ The cache in `app/adapters/youtube.py` is the highest-risk hot path. Rules:
 ## 6. Dependency bumps
 
 - Backend: `uv lock --upgrade-package <name> && uv sync --extra dev`, then
-  `./scripts/check.sh backend`. pytubefix bumps additionally warrant
+  `./scripts/check.sh backend`. yt-dlp bumps additionally warrant
   `uv run pytest -m integration` because its breakage is behavioral, not typed.
 - Frontend: `npm update <name>` in `frontend/`, then `./scripts/check.sh frontend`.
 - hls.js is loaded via dynamic import and its config
@@ -143,30 +147,24 @@ Tag `vX.Y.Z` on main → `.github/workflows/release.yml` re-runs the full gate, 
 Release. Keep `CHANGELOG.md` in Keep-a-Changelog format — the awk extraction in the
 workflow depends on `## [X.Y.Z]` headings.
 
-## 8. yt-dlp backend spike (branch `spike/ytdlp-backend`)
+## 8. yt-dlp migration (historical) and re-capturing fixtures
 
-Spec: `docs/dev/2026-09-24-ytdlp-spike-spec.md`. The yt-dlp backend is opt-in and
-covers `video()` and `search()` only (channel, playlist and the live master manifest
-stay on pytubefix).
+`yt-dlp` replaced `pytubefix` entirely on 2026-09-24 — no backend switch, no fallback.
+Spec: `docs/dev/2026-09-24-ytdlp-spike-spec.md`; measurement:
+`docs/dev/ytdlp-spike-report.md` (kept as a historical record — the comparison is
+over, the benchmark scripts that produced it are deleted). Result: pytubefix was
+blocked on 14 of 15 playable ids (`YOUTUBE_BLOCKED`); yt-dlp played all 13 VODs plus
+2 live streams, and search p50 dropped from 5.32 s to 1.28 s with 90–100% titled hits
+(was 0–5%, issue #14). Cold video lookup ~2.3 s p50.
 
-1. Install deno (yt-dlp's JavaScript runtime for YouTube): <https://deno.com>. Check
-   with `deno --version`. Without it the app logs one ERROR at startup and yt-dlp
-   extraction degrades or fails.
-2. Try it live: `YT_BACKEND=ytdlp ./scripts/dev.sh`.
-3. Measure, on a machine that can reach YouTube:
-   ```bash
-   uv run python scripts/bench_yt_backends.py --capture
-   uv run pytest -m integration        # every live test runs once per backend
-   uv run pytest tests/unit/test_youtube_ytdlp.py   # now against captured shapes
-   ```
-   - The benchmark writes `docs/dev/ytdlp-spike-report.md` (plus a `.json`). It exits
-     non-zero unless all of D1–D5 pass.
-   - `--capture` writes scrubbed yt-dlp responses to `tests/fixtures/ytdlp/`: signed,
-     IP-bound URLs are replaced by placeholders, so they're safe to commit.
-4. Edit `scripts/bench_yt_set.json` first:
-   - its ids were written without network access;
-   - the age-restricted slot needs a real id;
-   - live ids must be broadcasting.
-   If every row fails on both backends, the report says to check your network and deno.
-5. Decide by the report. The thresholds were fixed in the spec before measuring; don't
-   move them after.
+To re-capture yt-dlp fixtures (e.g. after a yt-dlp upgrade changes response shapes),
+on a machine that can reach YouTube:
+
+```bash
+uv run python scripts/capture_ytdlp_fixtures.py
+```
+
+This writes scrubbed yt-dlp responses to `tests/fixtures/ytdlp/`: signed, IP-bound
+URLs are replaced by placeholders, so they're safe to commit. Run
+`uv run pytest tests/unit/test_youtube_adapter.py` afterward against the refreshed
+fixtures.

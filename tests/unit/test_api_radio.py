@@ -55,7 +55,7 @@ def test_radio_calls_adapter_with_music_and_live(radio_client: tuple[TestClient,
 
 
 def test_radio_filters_out_confirmed_vod_items(monkeypatch: pytest.MonkeyPatch, bearer_token: str) -> None:
-    """Items where pytubefix marks is_live=False are dropped. Items where
+    """Items the adapter marks is_live=False are dropped. Items where
     is_live=True are kept. Items where is_live=None are kept iff they have
     no duration (true live broadcasts don't advertise a length)."""
     from app.adapters import youtube as adapter

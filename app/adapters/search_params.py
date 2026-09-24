@@ -3,8 +3,8 @@
 `sp` is a base64-encoded protobuf. Hum only needs three filters, all under
 root field 2: type=Video (field 1), feature=Live (field 8), and the Music
 topic (field 19). This tiny encoder covers exactly the wire types those use
-(varint and length-delimited) so a non-pytubefix backend can build the same
-bytes pytubefix sends — tests pin the output to pytubefix's own encodings.
+(varint and length-delimited). Tests pin the output to the encodings YouTube's
+own UI sends (captured from pytubefix 10.7.3 before it was removed).
 """
 from __future__ import annotations
 
@@ -52,8 +52,7 @@ def encode_message(msg: Message) -> str:
 def build_search_sp(*, category: str | None, live: bool) -> str | None:
     """The `sp` value for Hum's search options, or None when unfiltered.
 
-    Mirrors the pytubefix path: any filter implies type=Video; fields are
-    emitted in ascending order (pytubefix sorts them the same way).
+    Any filter implies type=Video; fields are emitted in ascending order.
     """
     if not category and not live:
         return None

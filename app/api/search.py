@@ -1,4 +1,4 @@
-"""GET /api/search — proxy to YouTube search via pytubefix adapter."""
+"""GET /api/search — proxy to YouTube search via the yt-dlp adapter."""
 from __future__ import annotations
 
 from typing import Literal

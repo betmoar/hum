@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **`pytubefix` is replaced entirely by `yt-dlp`** — no backend switch, no fallback.
+  Video details, search, channel, playlist, and the live HLS master manifest all go
+  through `yt-dlp` now; `yt_dlp` is imported in exactly one file
+  (`app/adapters/youtube.py`, invariant 1). Measured 2026-09-24: pytubefix was blocked
+  on 14 of 15 playable ids (`YOUTUBE_BLOCKED`); yt-dlp played all 13 VODs and 2 live
+  streams through the proxy, and search p50 dropped from 5.32 s to 1.28 s with
+  90–100% titled hits (was 0–5%, fixes empty search titles, #14). Cold video lookups
+  are slower (~2.3 s p50 vs a working pytubefix's ~0.3 s). Needs the
+  [deno](https://deno.com) JavaScript runtime on PATH; the Docker image ships it via
+  `denoland/deno:bin-2.9.7`, and the app logs one ERROR at startup if deno is missing.
+  Channel `subscriber_count` is now populated (yt-dlp `channel_follower_count`).
+  Loudness normalisation data (`loudnessDb`) is not available under yt-dlp.
+
+### Fixed
+
+- yt-dlp: "This video is unavailable" now maps to 404 `VIDEO_UNAVAILABLE` instead of
+  502 `UPSTREAM_FAILURE`.
+
+### Removed
+
+- `YT_BACKEND` setting, `app/adapters/youtube_ytdlp.py` (absorbed into
+  `app/adapters/youtube.py`), and the `pytubefix` dependency along with its
+  transitive deps (`aiohttp`, `nodejs-wheel-binaries`) and the Dockerfile's
+  pytubefix `__cache__` dir workaround. `scripts/bench_yt_backends.py` and
+  `scripts/bench_yt_set.json` are deleted (the pytubefix/yt-dlp comparison is over;
+  the result stays in `docs/dev/ytdlp-spike-report.md` as a historical record),
+  replaced by `scripts/capture_ytdlp_fixtures.py` for re-capturing yt-dlp test
+  fixtures.
+
 ## [0.1.2] - 2026-07-29
 
 ### Added
