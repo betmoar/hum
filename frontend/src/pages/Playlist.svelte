@@ -56,11 +56,23 @@
     };
   }
 
+  let playAllInFlight = $state(false);
+
   async function playAll() {
     if (!playlist || playlist.items.length === 0) return;
-    const [first, ...rest] = playlist.items;
-    store.enqueueStubs(rest.map(stub));
-    await store.playNowById(first.video_id);
+    if (playAllInFlight) return;
+    playAllInFlight = true;
+    try {
+      const [first, ...rest] = playlist.items;
+      await store.playNowById(first.video_id);
+      // Only queue the rest if the first track actually became current —
+      // playNowById is silent on failure (notifies internally), so re-check.
+      if (store.player.current?.videoId === first.video_id) {
+        store.enqueueStubs(rest.map(stub), { next: true });
+      }
+    } finally {
+      playAllInFlight = false;
+    }
   }
 
   function enqueueAll() {
@@ -88,7 +100,7 @@
           <span>{playlist.video_count} video{playlist.video_count === 1 ? '' : 's'}</span>
         </p>
         <div class="actions">
-          <button class="primary" onclick={playAll} disabled={playlist.items.length === 0}>
+          <button class="primary" onclick={playAll} disabled={playlist.items.length === 0 || playAllInFlight}>
             <Icon name="play" size={18} />
             Play all
           </button>
@@ -101,7 +113,7 @@
     </header>
 
     <div class="list">
-      {#each playlist.items as item (item.video_id)}
+      {#each playlist.items as item, i (`${i}:${item.video_id}`)}
         <ResultItem hit={asHit(item)} compact />
       {:else}
         <p class="empty">No videos in this playlist.</p>

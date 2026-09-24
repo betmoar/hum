@@ -71,3 +71,83 @@ describe('Playlist page — hero', () => {
     expect(container.querySelectorAll('.item.compact')).toHaveLength(2);
   });
 });
+
+describe('Playlist page — duplicate video_id (review finding #1)', () => {
+  it('renders both rows when a playlist contains the same video twice', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue({
+      ...samplePlaylist,
+      items: [
+        { video_id: 'dup', title: 'Dup A', author: 'Artist A', duration_seconds: 100, thumbnail_url: '' },
+        { video_id: 'dup', title: 'Dup B', author: 'Artist B', duration_seconds: 100, thumbnail_url: '' },
+      ],
+    });
+    const { findByText, container } = render(Playlist, { props: { id: 'PL123' } });
+    await findByText('Great Mix');
+    expect(await findByText('Dup A')).toBeTruthy();
+    expect(await findByText('Dup B')).toBeTruthy();
+    expect(container.querySelectorAll('.item.compact')).toHaveLength(2);
+  });
+});
+
+describe('Playlist page — Play all ordering + in-flight guard (review finding #2)', () => {
+  const orderedPlaylist: PlaylistInfo = {
+    playlist_id: 'PL123',
+    title: 'Great Mix',
+    author: 'Some Channel',
+    video_count: 3,
+    items: [
+      { video_id: 'a', title: 'Track A2', author: 'Artist A', duration_seconds: 10, thumbnail_url: '' },
+      { video_id: 'b', title: 'Track B2', author: 'Artist B', duration_seconds: 20, thumbnail_url: '' },
+      { video_id: 'c', title: 'Track C2', author: 'Artist C', duration_seconds: 30, thumbnail_url: '' },
+    ],
+  };
+  const opusA = {
+    itag: 251, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, codec: 'opus',
+    url: '/proxy/audio/a?itag=251',
+  };
+
+  it('plays track 1 now and inserts tracks 2..N ahead of the previously-queued tracks', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue(orderedPlaylist);
+    const storeMod = await import('../../src/lib/store.svelte');
+    storeMod.store.clear();
+    storeMod.store.enqueueStubs([
+      { videoId: 'x', title: 'X', author: '', durationSeconds: 1, thumbnailUrl: '' },
+      { videoId: 'y', title: 'Y', author: '', durationSeconds: 1, thumbnailUrl: '' },
+    ]);
+    vi.spyOn(api, 'video').mockResolvedValue({
+      video_id: 'a', title: 'Track A2', author: 'Artist A', duration_seconds: 10,
+      thumbnail_url: '', audio_formats: [opusA], video_formats: [],
+    } as any);
+
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PL123' } });
+    await findByText('Great Mix');
+    const btn = getByText(/play all/i);
+    await fireEvent.click(btn);
+
+    await waitFor(() => expect(storeMod.store.player.current?.videoId).toBe('a'));
+    expect(storeMod.store.queue.map((t) => t.videoId)).toEqual(['b', 'c', 'x', 'y']);
+  });
+
+  it('a second click while Play all is in flight does not re-fetch the first track', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue(orderedPlaylist);
+    const storeMod = await import('../../src/lib/store.svelte');
+    storeMod.store.clear();
+    let resolveVideo!: (v: Awaited<ReturnType<typeof api.video>>) => void;
+    const videoSpy = vi.spyOn(api, 'video').mockImplementation(
+      () => new Promise<Awaited<ReturnType<typeof api.video>>>((res) => { resolveVideo = res; }),
+    );
+
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PL123' } });
+    await findByText('Great Mix');
+    const btn = getByText(/play all/i);
+    await fireEvent.click(btn);
+    await fireEvent.click(btn);
+
+    expect(videoSpy).toHaveBeenCalledTimes(1);
+    resolveVideo({
+      video_id: 'a', title: 'Track A2', author: 'Artist A', duration_seconds: 10,
+      thumbnail_url: '', audio_formats: [opusA], video_formats: [],
+    } as any);
+    await waitFor(() => expect(storeMod.store.player.current?.videoId).toBe('a'));
+  });
+});
