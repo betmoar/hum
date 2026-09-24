@@ -58,3 +58,16 @@ describe('Playlist page', () => {
     expect(await findByText(/VIDEO_UNAVAILABLE/i)).toBeTruthy();
   });
 });
+
+describe('Playlist page — hero', () => {
+  it('shows the first track thumbnail as cover and compact rows', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue({
+      ...samplePlaylist,
+      items: samplePlaylist.items.map((i, n) => ({ ...i, thumbnail_url: `https://i.ytimg.com/vi/${n}/hq.jpg` })),
+    });
+    const { findByText, container } = render(Playlist, { props: { id: 'PL123' } });
+    await findByText('Great Mix');
+    expect(container.querySelector('.art-frame img')?.getAttribute('src')).toBe('https://i.ytimg.com/vi/0/hq.jpg');
+    expect(container.querySelectorAll('.item.compact')).toHaveLength(2);
+  });
+});

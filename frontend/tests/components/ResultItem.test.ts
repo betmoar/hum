@@ -94,3 +94,18 @@ describe('ResultItem — live tracks', () => {
     expect(queryByText(/Live playback requires Safari/i)).toBeNull();
   });
 });
+
+describe('ResultItem — compact + current', () => {
+  it('compact hides the kind line', () => {
+    const { container } = render(ResultItem, { props: { hit: videoHit, compact: true } });
+    expect(container.querySelector('.kind')).toBeNull();
+  });
+
+  it('marks the currently playing video', async () => {
+    const { store } = await import('../../src/lib/store.svelte');
+    store.player.current = { videoId: videoHit.id, title: 't', author: 'a', durationSeconds: 1, thumbnailUrl: '', audioUrl: '', itag: 140 };
+    const { container } = render(ResultItem, { props: { hit: videoHit } });
+    expect(container.querySelector('.item')?.getAttribute('aria-current')).toBe('true');
+    store.player.current = null;
+  });
+});

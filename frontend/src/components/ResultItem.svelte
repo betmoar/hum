@@ -5,8 +5,11 @@
   import { store } from '../lib/store.svelte';
   import Icon from './Icon.svelte';
 
-  type Props = { hit: SearchHit };
-  let { hit }: Props = $props();
+  // compact: inside a playlist every row is a video, so the kind line is noise.
+  type Props = { hit: SearchHit; compact?: boolean };
+  let { hit, compact = false }: Props = $props();
+
+  const isCurrent = $derived(hit.kind === 'video' && store.player.current?.videoId === hit.id);
 
   let imgFailed = $state(false);
 
@@ -28,6 +31,9 @@
 
 <div
   class="item"
+  class:compact
+  class:current={isCurrent}
+  aria-current={isCurrent ? 'true' : undefined}
   role="button"
   tabindex="0"
   aria-disabled={browsable ? 'false' : 'true'}
@@ -49,13 +55,13 @@
   <div class="meta">
     <div class="title">{hit.title}</div>
     {#if hit.author}<div class="author">{hit.author}</div>{/if}
-    <div class="kind">
+    {#if !compact}<div class="kind">
       {#if hit.kind === 'playlist' && hit.video_count != null}
         playlist &middot; {hit.video_count} video{hit.video_count === 1 ? '' : 's'}
       {:else}
         {hit.kind}
       {/if}
-    </div>
+    </div>{/if}
   </div>
   {#if hit.kind === 'video'}
     <div class="actions">
@@ -88,6 +94,14 @@
     backdrop-filter: blur(30px) saturate(170%);
     -webkit-backdrop-filter: blur(30px) saturate(170%);
     cursor: pointer;
+  }
+  .item.compact {
+    padding: var(--s-2) var(--s-3);
+  }
+  .item.compact .thumb { width: 112px; }
+  .item.current {
+    border-color: var(--accent);
+    background: var(--glass-2);
   }
   .item[aria-disabled="true"] {
     opacity: 0.45;

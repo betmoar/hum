@@ -28,6 +28,10 @@
     return () => { cancelled = true; };
   });
 
+  // Playlist listings carry no cover of their own; the first track's
+  // thumbnail is what YouTube shows as the playlist cover too.
+  const cover = $derived(playlist?.items.find((i) => i.thumbnail_url)?.thumbnail_url ?? '');
+
   function asHit(item: PlaylistItem): SearchHit {
     return {
       kind: 'video',
@@ -73,6 +77,9 @@
     <p class="error">{error}</p>
   {:else if playlist}
     <header class="hero">
+      {#if cover}
+        <div class="art-frame"><img src={cover} alt="" /></div>
+      {/if}
       <div class="info">
         <p class="eyebrow">Playlist</p>
         <h1>{playlist.title}</h1>
@@ -95,7 +102,7 @@
 
     <div class="list">
       {#each playlist.items as item (item.video_id)}
-        <ResultItem hit={asHit(item)} />
+        <ResultItem hit={asHit(item)} compact />
       {:else}
         <p class="empty">No videos in this playlist.</p>
       {/each}
@@ -110,7 +117,26 @@
     margin: 0 auto;
   }
   .hero {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) 1fr;
+    gap: var(--s-6);
+    align-items: end;
     margin-bottom: var(--s-7);
+  }
+  .hero:not(:has(.art-frame)) { grid-template-columns: 1fr; }
+  .art-frame {
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    border-radius: var(--r-xl);
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+    box-shadow: var(--inner-top-highlight), 0 30px 60px rgba(0, 0, 0, 0.55);
+    background: var(--glass-2);
+  }
+  .art-frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  @media (max-width: 720px) {
+    .hero { grid-template-columns: 1fr; gap: var(--s-5); }
+    .art-frame { max-width: 320px; }
   }
   .eyebrow {
     color: var(--ink-faint);
