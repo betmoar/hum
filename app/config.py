@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,11 @@ class Settings(BaseSettings):
 
     # CORS — comma-separated origins; default localhost only
     cors_origins: str = "http://127.0.0.1,http://localhost"
+
+    # YouTube backend for video()/search() (spike/ytdlp-backend). "ytdlp"
+    # needs the deno JavaScript runtime on PATH; channel/playlist/live-manifest
+    # stay on pytubefix either way.
+    yt_backend: Literal["pytubefix", "ytdlp"] = "pytubefix"
 
     # Upstream
     upstream_connect_timeout: float = 10.0

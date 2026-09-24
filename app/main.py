@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.adapters import upstream_http
+from app.adapters import upstream_http, youtube
 from app.adapters.upstream_http import UpstreamHostError, UpstreamRangeError, UpstreamStatusError
 from app.adapters.youtube import YouTubeError
 from app.api import channel, hls, live, playlist, radio, search, video
@@ -40,6 +40,7 @@ def _configure_logging() -> None:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     _configure_logging()
     logging.getLogger("hum").info("starting up")
+    youtube.check_backend_requirements()
     yield
     await upstream_http.close()
     logging.getLogger("hum").info("shut down")

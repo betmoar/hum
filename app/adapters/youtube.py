@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
 import time
 import urllib.parse
 from collections.abc import Callable
@@ -202,6 +203,14 @@ async def _run_search(
 ) -> list[SearchHit]:
     """The uncached search fetch. Split out of search() so the whole two-step
     fetch runs inside one single-flight task."""
+    if get_settings().yt_backend == "ytdlp":
+        from app.adapters import youtube_ytdlp
+        from app.adapters.search_params import build_search_sp
+
+        sp = build_search_sp(category=category, live=live)
+        hits = await asyncio.to_thread(youtube_ytdlp.search_hits, query, limit, sp)
+        _store_search_hits(hits, cache_key)
+        return hits
     raw_filters = _build_search_filters(category=category, live=live)
     pytubefix_filters: dict[str, Any] | None = None
     wants_music = False
@@ -267,6 +276,21 @@ async def video(video_id: str) -> VideoDetails:
     # Copy on the way out: the caller signs by mutating what it receives, and
     # all callers here share one task result.
     return (await asyncio.shield(task)).model_copy(deep=True)
+
+
+_EJS_WIKI_URL = "https://github.com/yt-dlp/yt-dlp/wiki/EJS"
+
+
+def check_backend_requirements() -> None:
+    """Startup check (app.main lifespan). The yt-dlp backend needs a JS
+    runtime for YouTube; without one it degrades (formats missing) or fails.
+    Logs loudly and keeps serving — failures then surface per request as the
+    usual mapped 502/503, never a crashed app."""
+    if get_settings().yt_backend == "ytdlp" and shutil.which("deno") is None:
+        logger.error(
+            "YT_BACKEND=ytdlp but the deno JavaScript runtime is not on PATH; "
+            "YouTube extraction will degrade or fail. Install deno: %s", _EJS_WIKI_URL,
+        )
 
 
 async def channel(channel_id: str) -> ChannelInfo:
@@ -364,6 +388,13 @@ async def _refresh_cache_once(video_id: str) -> None:
 
 
 def _fetch_video(video_id: str) -> VideoDetails:
+    # Backend dispatch lives here so the metadata cache, single-flight and the
+    # stream-URL refresh (_refresh_cache) all go through the same backend.
+    # Lazy import: youtube_ytdlp imports helpers from this module.
+    if get_settings().yt_backend == "ytdlp":
+        from app.adapters import youtube_ytdlp
+
+        return youtube_ytdlp.fetch_video(video_id)
     yt = _make_youtube(video_id)
     return _normalise_video(video_id, yt)
 
@@ -663,12 +694,17 @@ def _collect_and_cache_search(
     _refresh_cache — without it the search cache would grow unbounded.
     """
     hits = _collect_search_hits(s, limit)
+    _store_search_hits(hits, cache_key)
+    return hits
+
+
+def _store_search_hits(hits: list[SearchHit], cache_key: tuple[str, str | None, bool, int]) -> None:
+    """Search-cache write + eviction sweep, shared by both backends."""
     # Clamped like the video-metadata TTL: an operator-set value is defence in
     # depth away from serving hours-stale search results.
     ttl = min(float(get_settings().search_cache_ttl_seconds), _CACHE_MAX_TTL)
     _search_cache[cache_key] = (list(hits), time.time() + ttl)
     _evict_expired()
-    return hits
 
 
 def _safe_call(fn: Any, arg: Any) -> Any:
