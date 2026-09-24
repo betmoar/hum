@@ -164,13 +164,16 @@ def _map_error(e: BaseException) -> YouTubeError:
       - gone/private/removed  -> 404 VIDEO_UNAVAILABLE
       - anything else         -> 502 UPSTREAM_FAILURE (yt-dlp broke / YouTube changed)
     """
+    # YouTubeError.message is returned to clients; yt-dlp's text can carry
+    # signed googlevideo URLs (invariant 3). Raw text stays in the server log.
     msg = str(e)
     low = msg.lower()
+    logger.info("yt-dlp failure (%s): %s", type(e).__name__, msg)
     if any(m in low for m in _BLOCKED_MARKERS):
-        return YouTubeError(503, "YOUTUBE_BLOCKED", f"YouTube is blocking requests (yt-dlp: {msg})")
+        return YouTubeError(503, "YOUTUBE_BLOCKED", "YouTube is blocking requests")
     if any(m in low for m in _UNAVAILABLE_MARKERS):
-        return YouTubeError(404, "VIDEO_UNAVAILABLE", f"video unavailable (yt-dlp: {msg})")
-    return YouTubeError(502, "UPSTREAM_FAILURE", f"yt-dlp failed ({type(e).__name__}: {msg})")
+        return YouTubeError(404, "VIDEO_UNAVAILABLE", "video unavailable")
+    return YouTubeError(502, "UPSTREAM_FAILURE", "YouTube extraction failed")
 
 
 def _extract(url: str, extra: dict[str, Any]) -> dict[str, Any]:
@@ -388,14 +391,21 @@ async def resolve_live_master_url(video_id: str) -> str:
             502, "LIVE_UNAVAILABLE",
             f"live manifest unavailable for {video_id}",
         )
-    upstream_expire = _url_expire_epoch(info.master_hls_url)
+    _cache_live_master(video_id, info.master_hls_url)
+    return info.master_hls_url
+
+
+def _cache_live_master(video_id: str, master_url: str) -> None:
+    """Cache a live master URL under ("live", video_id) with TTL
+    min(5 min, upstream `expire`). Single dict write (GIL-atomic)."""
+    now = time.time()
+    upstream_expire = _url_expire_epoch(master_url)
     # Clamp by upstream `expire` only when it lies in the future; an already-past
     # value is treated as no constraint (the URL is either ageless or the param
     # is sentinel/garbage). 5-minute ceiling still applies.
     soft_ceiling = now + 300.0
     expiry = min(soft_ceiling, upstream_expire) if upstream_expire > now else soft_ceiling
-    _stream_url_cache[key] = (info.master_hls_url, expiry)
-    return info.master_hls_url
+    _stream_url_cache[("live", video_id)] = (master_url, expiry)
 
 
 async def _refresh_cache_once(video_id: str) -> None:
@@ -425,9 +435,14 @@ def _fetch_video(video_id: str) -> VideoDetails:
     """Thread-bound (call via asyncio.to_thread). Writes the stream cache."""
     info = _extract(f"https://www.youtube.com/watch?v={video_id}", {})
     if info.get("live_status") == "is_live":
-        # The client only ever gets the /api/live route; the master URL is
-        # resolved server-side by resolve_live_master_url.
-        return _live_video_details(video_id, _live_info(video_id, info))
+        # The client only ever gets the /api/live route. Don't advertise it
+        # without a manifest behind it; do prime the master-URL cache, which
+        # saves resolve_live_master_url a second extraction at play time.
+        live = _live_info(video_id, info)
+        if not live.master_hls_url:
+            raise YouTubeError(502, "LIVE_UNAVAILABLE", f"live manifest unavailable for {video_id}")
+        _cache_live_master(video_id, live.master_hls_url)
+        return _live_video_details(video_id, live)
 
     audio: list[AudioFormat] = []
     video: list[VideoFormat] = []
@@ -685,6 +700,10 @@ def _hit(entry: Any) -> SearchHit | None:
             is_live=True if entry.get("live_status") == "is_live" else None,
         )
     if "list=" in url:
+        if eid.startswith("RD"):
+            # YouTube "Mix" radios: listed in search, but unviewable as a
+            # playlist ("This playlist type is unviewable").
+            return None
         return SearchHit(
             kind="playlist", id=eid, title=title, author=_author(entry),
             thumbnail_url=_thumb(entry) or "", video_count=_int(entry.get("playlist_count")),
@@ -709,7 +728,9 @@ def _search_hits(query: str, limit: int, sp: str | None) -> list[SearchHit]:
         except Exception:
             logger.debug("skipping malformed yt-dlp search entry", exc_info=True)
             continue
-        if hit is not None:
+        # Any filter means "videos only" (see search_params.build_search_sp),
+        # but YouTube ignores type=Video once a topic is set — enforce it here.
+        if hit is not None and (sp is None or hit.kind == "video"):
             hits.append(hit)
             if len(hits) >= limit:
                 break

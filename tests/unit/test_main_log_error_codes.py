@@ -236,3 +236,21 @@ def test_success_response_has_no_code_suffix(caplog):
     line = access_records[0].getMessage()
     assert "-> 200" in line
     assert "code=" not in line
+
+
+def test_httpx_request_lines_are_not_logged_at_info() -> None:
+    """httpx logs every request URL at INFO — for proxied media that is a signed
+    googlevideo URL carrying the server's IP and sig/lsig. Hum's own hum.access
+    line already records each request, so httpx is capped at WARNING."""
+    from app.main import _configure_logging
+
+    httpx_logger = logging.getLogger("httpx")
+    saved = httpx_logger.level
+    httpx_logger.setLevel(logging.NOTSET)
+    try:
+        _configure_logging()
+        # The logger's OWN level: effective level would inherit the root's,
+        # which pytest already sets to WARNING, hiding a missing cap.
+        assert httpx_logger.level >= logging.WARNING
+    finally:
+        httpx_logger.setLevel(saved)

@@ -1,10 +1,10 @@
-"""Backend-neutral encoder for YouTube's search filter parameter (`sp=`).
+"""Encoder for YouTube's search filter parameter (`sp=`).
 
 `sp` is a base64-encoded protobuf. Hum only needs three filters, all under
-root field 2: type=Video (field 1), feature=Live (field 8), and the Music
+root field 2: type=Video (field 2), feature=Live (field 8), and the Music
 topic (field 19). This tiny encoder covers exactly the wire types those use
-(varint and length-delimited). Tests pin the output to the encodings YouTube's
-own UI sends (captured from pytubefix 10.7.3 before it was removed).
+(varint and length-delimited). Field numbers verified against live YouTube
+2026-09-24 — field 1 is sort order, not type (see tests/unit/test_search_params.py).
 """
 from __future__ import annotations
 
@@ -52,11 +52,12 @@ def encode_message(msg: Message) -> str:
 def build_search_sp(*, category: str | None, live: bool) -> str | None:
     """The `sp` value for Hum's search options, or None when unfiltered.
 
-    Any filter implies type=Video; fields are emitted in ascending order.
+    Any filter implies type=Video (field 2 of the filter message — field 1 is
+    sort order); fields are emitted in ascending order.
     """
     if not category and not live:
         return None
-    inner: Message = {1: 1}
+    inner: Message = {2: 1}
     if live:
         inner[8] = 1
     if category == "music":

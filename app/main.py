@@ -31,6 +31,9 @@ def _configure_logging() -> None:
     else:
         fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
     logging.basicConfig(level=level, format=fmt)
+    # httpx logs every request URL at INFO; for media those are signed
+    # googlevideo URLs with the server's IP. hum.access already logs requests.
+    logging.getLogger("httpx").setLevel(max(level, logging.WARNING))
 
 
 # ----- App ------------------------------------------------------------------

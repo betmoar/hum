@@ -654,3 +654,81 @@ def test_ffmpeg_warning_is_debug_not_warning(caplog: pytest.LogCaptureFixture) -
     levels = {r.getMessage(): r.levelno for r in caplog.records}
     assert levels["yt-dlp: ffmpeg not found. The downloaded format may not be the best available."] == logging.DEBUG
     assert levels["yt-dlp: Signature solving failed"] == logging.WARNING
+
+
+# ---- review fixes (PR #16) --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ERROR: [youtube] x: Sign in to confirm you're not a bot",
+        "ERROR: [youtube] x: Video unavailable",
+        "ERROR: unable to download https://rr1---sn.googlevideo.com/videoplayback?ip=1.2.3.4&sig=SECRET",
+    ],
+)
+def test_error_message_is_client_safe(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    """YouTubeError.message goes to clients in the JSON error body; yt-dlp's
+    raw text can carry signed googlevideo URLs (invariant 3)."""
+    from yt_dlp.utils import DownloadError
+
+    _install(monkeypatch, DownloadError(message))
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("x")
+    assert "yt-dlp:" not in ei.value.message
+    assert "googlevideo" not in ei.value.message and "SECRET" not in ei.value.message
+
+
+def test_live_without_manifest_is_not_advertised(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = {**LIVE_INFO, "formats": [f for f in LIVE_INFO["formats"] if not f.get("manifest_url")]}
+    _install(monkeypatch, info)
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("live1234567")
+    assert (ei.value.status, ei.value.code) == (502, "LIVE_UNAVAILABLE")
+
+
+def test_live_fetch_primes_master_manifest_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The metadata extraction already carries the master URL; caching it saves
+    resolve_live_master_url a second ~2 s extraction when playback starts."""
+    _install(monkeypatch, LIVE_INFO)
+    youtube._fetch_video("live1234567")
+    cached = youtube._stream_url_cache.get(("live", "live1234567"))
+    assert cached is not None and "manifest" in cached[0]
+
+
+def test_search_drops_unviewable_mix_playlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """YouTube 'Mix' radios (list id RD...) show up in search but /api/playlist
+    can't open them ('This playlist type is unviewable')."""
+    entries = [
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "RDS-G9gMEY7pQ",
+         "url": "https://www.youtube.com/playlist?list=RDS-G9gMEY7pQ", "title": "Mix - x"},
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "PLabcdefghijk",
+         "url": "https://www.youtube.com/playlist?list=PLabcdefghijk", "title": "Real list"},
+    ]
+    _install(monkeypatch, {"entries": entries})
+    assert [h.id for h in youtube._search_hits("q", 10, None)] == ["PLabcdefghijk"]
+
+
+def test_search_music_filter_sends_video_type() -> None:
+    """Hum's category/live filters mean 'videos only'. YouTube's type=Video is
+    field 2 of the filter message; field 1 is sort order, and sp={2:{1:1}}
+    (sort-by-upload-date) returned 0 results for 'verknipt' (measured 2026-09-24)."""
+    from app.adapters.search_params import build_search_sp, encode_message
+
+    assert build_search_sp(category="music", live=False) == encode_message({2: {2: 1, 19: "/m/04rlf"}})
+    assert build_search_sp(category=None, live=True) == encode_message({2: {2: 1, 8: 1}})
+
+
+def test_filtered_search_returns_only_videos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With category/live set, YouTube still mixes in channels and playlists
+    (type=Video is ignored once a topic is set — measured 2026-09-24)."""
+    entries = [
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "UCchannel0000000000000",
+         "url": "https://www.youtube.com/channel/UCchannel0000000000000", "title": "Chan"},
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "PLabcdefghijk",
+         "url": "https://www.youtube.com/playlist?list=PLabcdefghijk", "title": "List"},
+        SEARCH_INFO["entries"][0],
+    ]
+    _install(monkeypatch, {"entries": entries})
+    assert [h.kind for h in youtube._search_hits("q", 10, "Eg0QAZoBCC9tLzA0cmxm")] == ["video"]
+    assert {h.kind for h in youtube._search_hits("q", 10, None)} == {"video", "channel", "playlist"}
