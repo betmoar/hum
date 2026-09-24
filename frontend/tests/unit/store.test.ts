@@ -852,3 +852,40 @@ describe('code-review fixes — previous/replay', () => {
     mod.playerControls.current = null;
   });
 });
+
+describe('copilot review — unreachable on initial fetch', () => {
+  it('playNowById offers a sticky Retry that re-runs the fetch', async () => {
+    const { ApiError, api } = await import('../../src/lib/api');
+    const s = await freshStore();
+    s.dismissToast();
+    const video = vi.spyOn(api, 'video').mockRejectedValue(new ApiError(0, 'down'));
+    await s.playNowById('abc');
+    expect(s.toast?.message).toBe("Can't reach Hum server.");
+    expect(s.toast?.action?.label).toBe('Retry');
+    video.mockClear();
+    s.toast!.action!.onclick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(video).toHaveBeenCalledWith('abc');
+    video.mockRestore();
+    s.dismissToast();
+  });
+
+  it('enqueueById retry re-runs enqueue, not play', async () => {
+    const { ApiError, api } = await import('../../src/lib/api');
+    const s = await freshStore();
+    s.dismissToast();
+    const video = vi.spyOn(api, 'video').mockRejectedValueOnce(new ApiError(0, 'down'));
+    await s.enqueueById('q1');
+    video.mockResolvedValueOnce({
+      video_id: 'q1', title: 'T', author: 'A', channel_id: 'c', duration_seconds: 100, thumbnail_url: '',
+      audio_formats: [{ itag: 140, mime_type: 'audio/mp4', bitrate: 128000, codec: 'mp4a.40.2', url: '/proxy/audio/q1?itag=140' }],
+      video_formats: [],
+    } as any);
+    s.toast!.action!.onclick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.queue.map((x) => x.videoId)).toEqual(['q1']);
+    expect(s.player.current).toBeNull();
+    video.mockRestore();
+    s.dismissToast();
+  });
+});

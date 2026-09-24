@@ -521,6 +521,12 @@
     store.next();
   }
 
+  // Retry for a track that still has its URL: reloading re-enters the error
+  // path (and so handleError's ladder) if it still fails.
+  function reloadCurrent() {
+    if (el) { el.load(); safePlay(el); }
+  }
+
   // Re-run the rehydrate effects for the current track: a fresh object with
   // the same videoId re-triggers them without touching history.
   function retryCurrent() {
@@ -547,7 +553,7 @@
     // the old one now would overwrite it.
     if (store.player.current?.videoId !== t.videoId) return;
     if (unreachable) {
-      store.notifyUnreachable(() => { if (el) { el.load(); safePlay(el); } });
+      store.notifyUnreachable(reloadCurrent);
       return;
     }
 
@@ -617,8 +623,15 @@
         store.player.current = next;
         if (lastPos > 0) playerControls.current?.restoreAt?.(lastPos);
       }
-    } catch {
-      // Give up silently; user can hit Play again.
+    } catch (e) {
+      // Hum went down between the healthy probe and this refetch: that's not
+      // this stream's failure, so give the recovery slot back and say what
+      // is actually wrong (only if the user is still on this track).
+      if (isUnreachable(e)) {
+        recoveredVideoIds.delete(t.videoId);
+        if (store.player.current?.videoId === t.videoId) store.notifyUnreachable(reloadCurrent);
+      }
+      // Otherwise give up silently; user can hit Play again.
     }
   }
 </script>

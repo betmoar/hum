@@ -434,7 +434,9 @@ class AppStore {
     };
   }
 
-  async #fetchTrack(videoId: string, tier: Quality): Promise<Track | null> {
+  // `retry` re-runs the caller's whole operation (play / enqueue / play
+  // next) from the unreachable toast's Retry action.
+  async #fetchTrack(videoId: string, tier: Quality, retry: () => void): Promise<Track | null> {
     try {
       const d = await api.video(videoId);
       // Live tracks have no audio_formats — build directly from the live
@@ -444,14 +446,14 @@ class AppStore {
       if (!fmt) { this.notify('No playable format found.', 'error'); return null; }
       return this.#buildTrack(d, fmt, tier);
     } catch (e) {
-      if (isUnreachable(e)) this.notifyUnreachable();
+      if (isUnreachable(e)) this.notifyUnreachable(retry);
       else this.notify('Could not load this track.', 'error');
       return null;
     }
   }
 
   async playNowById(videoId: string): Promise<void> {
-    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality);
+    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality, () => void this.playNowById(videoId));
     if (t) this.playNow(t);
   }
 
@@ -468,12 +470,12 @@ class AppStore {
   }
 
   async enqueueById(videoId: string): Promise<void> {
-    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality);
+    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality, () => void this.enqueueById(videoId));
     if (t) this.enqueue(t);
   }
 
   async playNextById(videoId: string): Promise<void> {
-    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality);
+    const t = await this.#fetchTrack(videoId, this.settings.defaultQuality, () => void this.playNextById(videoId));
     if (t) this.playNext(t);
   }
 

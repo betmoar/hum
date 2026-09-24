@@ -667,3 +667,30 @@ describe('Player — pre-existing fixes', () => {
     expect(cur._formats?.map((f) => f.itag)).toEqual([251, 140]);
   });
 });
+
+describe('Player — copilot review', () => {
+  it('refetch failing as unreachable after a healthy probe shows the Hum toast and frees the recovery slot', async () => {
+    // No alternate codec, so handleError goes straight to the refetch step.
+    const video = vi.spyOn(api, 'video').mockRejectedValue(new ApiError(0, 'down'));
+    store.playNow(sampleTrack('hd', '/proxy/audio/hd?x'));
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    audio.dispatchEvent(new Event('error'));
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    expect(store.toast?.message).toBe("Can't reach Hum server.");
+    const load = vi.spyOn(audio, 'load').mockImplementation(() => {});
+    store.toast!.action!.onclick();
+    expect(load).toHaveBeenCalled();
+    // Slot freed: a second error tries the refetch again instead of
+    // jumping to the "Stream failed" give-up toast.
+    video.mockClear();
+    store.dismissToast();
+    audio.dispatchEvent(new Event('error'));
+    await new Promise((r) => setTimeout(r, 0));
+    await tick();
+    expect(video).toHaveBeenCalledTimes(1);
+    expect(store.toast?.message).not.toBe('Stream failed. Try again?');
+  });
+});
