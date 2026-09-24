@@ -61,6 +61,10 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
   streams are normal; adding a total timeout kills them mid-track.
 - **`_stream_url_cache` is written from `asyncio.to_thread` workers** and read from the
   event loop. Single dict ops only (GIL-atomic). Don't add compound read-modify-write.
+- **Single-video extractions reuse one `YoutubeDL` per worker thread** (`_video_ydl`,
+  thread-local). It keeps the parsed player JS (~20% of a cold lookup). A `YoutubeDL` is
+  not thread-safe: never share one instance across threads. Listings (extra opts) still
+  build a fresh one per call.
 - **YouTube's `expire=` param is trusted but clamped** to 1 h (`_CACHE_MAX_TTL`). The
   cache can still go stale early (IP change invalidates URLs) — the frontend's
   `handleError` → refetch path is the recovery, keyed by status codes, which is why

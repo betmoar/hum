@@ -58,7 +58,7 @@ app/
 | GET | `/api/search?q&limit` | bearer | Search (videos + channels + playlists) |
 | GET | `/api/video/{id}` | bearer | Metadata + signed proxy URLs |
 | GET | `/api/channel/{id}` | bearer | Channel info |
-| GET | `/api/playlist/{id}` | bearer | Playlist with items |
+| GET | `/api/playlist/{id}?start&limit` | bearer | Playlist window (default/max 200 items); `truncated` + `next_start` cursor for the next page |
 | GET | `/proxy/audio/{id}?itag&exp&sig` | signed URL | Audio stream (range-aware) |
 | GET | `/proxy/stream/{id}?itag&exp&sig` | signed URL | Video stream (range-aware) |
 | GET | `/proxy/thumbnail/{id}?itag=0&exp&sig` | signed URL | Thumbnail |
@@ -123,12 +123,15 @@ frontend/src/
 │   ├── ResultItem.svelte
 │   ├── QueueItem.svelte
 │   ├── Spinner.svelte
+│   ├── SettingsDialog.svelte  Modal <dialog> around Settings (never a route)
 │   └── Player.svelte        Persistent <audio> with Media Session API
 └── pages/
     ├── Search.svelte
     ├── Video.svelte         Format picker + Play/Enqueue
+    ├── Playlist.svelte      Playlist window + Load more
     ├── Queue.svelte
-    └── Settings.svelte
+    ├── Radio.svelte
+    └── Settings.svelte      Settings content, rendered inside SettingsDialog
 ```
 
 ### Frontend invariants
@@ -196,6 +199,8 @@ URL-expiry recovery is tracked by a `Set<videoId>` so a persistently-broken trac
 ### Routing
 
 Hand-rolled hash router (~25 LOC). State is `$state(read())` updated on `hashchange`. `App.svelte` renders `{@const Page = router.match.component}` and passes `router.match.params` as props.
+
+Settings is not a route: `router.settingsOpen` drives `SettingsDialog`, so the page underneath stays mounted. A `#/settings` deep link opens the dialog and is rewritten to `#/` with `history.replaceState` (no extra history entry).
 
 ## Tuning constants (reasoned, not measured)
 

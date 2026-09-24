@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # App
     app_name: str = "Hum"
-    app_version: str = "0.2.0"
+    app_version: str = "0.2.1"
     debug: bool = False
 
     # Server
