@@ -69,11 +69,17 @@
     -webkit-backdrop-filter: blur(40px) saturate(180%);
   }
   .settings-dialog:focus { outline: none; }
+  /* Only .dialog-body scrolls; the <dialog> itself must not (Safari shows
+     its own scrollbar on the UA default overflow: auto). */
+  .settings-dialog { overflow: hidden; }
   .dialog-body {
     max-height: min(85vh, 760px);
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-width: thin;
+    /* No visible scrollbar (Safari ignores scrollbar-width: thin and draws
+       a full-height bar); wheel, trackpad and touch still scroll, and the
+       edge fade shows there is more below. */
+    scrollbar-width: none;
     /* The scroll area starts below the close button, so scrolled content
        never slides under it, and stops short of the rounded corners. */
     --dialog-top: calc(var(--s-4) + 36px - var(--s-2));
@@ -82,6 +88,7 @@
     max-height: calc(min(85vh, 760px) - var(--dialog-top) - var(--s-4));
     mask-image: linear-gradient(to bottom, transparent 0, #000 var(--s-4), #000 calc(100% - var(--s-4)), transparent 100%);
   }
+  .dialog-body::-webkit-scrollbar { display: none; }
   .dialog-body :global(header) { margin-bottom: var(--s-5); }
   /* Inside the dialog the page's own glass card would be a second frosted
      frame in a frosted frame: flatten it so the dialog is the only surface. */
