@@ -91,3 +91,8 @@ class PlaylistInfo(BaseModel):
     author: str | None = None
     video_count: int
     items: list[PlaylistItem]
+    # True when `items` is a prefix of the full playlist (video_count > len(items)
+    # alone is not reliable: video_count can also be under-reported by YouTube
+    # for very large or partially-restricted playlists, or the fetch window can
+    # start beyond 0). Explicit signal so the frontend never has to infer it.
+    truncated: bool = False

@@ -132,11 +132,26 @@ def _search_info(
     }
 
 
+def _playlist_info(
+    *, playlist_id: str = "PLtest", title: str = "P", count: int = 1,
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "uploader": "Curator",
+        "playlist_count": count,
+        "entries": [
+            {"id": "vid1", "title": "Item One", "channel": "Author", "duration": 60},
+        ],
+    }
+
+
 def _default_respond(url: str) -> dict[str, Any]:
     """Dispatch a canned info dict by URL shape: search hits an entries page,
-    video hits a watch page."""
+    playlist hits a playlist page, video hits a watch page."""
     if "/results?" in url:
         return _search_info()
+    if "/playlist?" in url:
+        return _playlist_info()
     return _video_info()
 
 
@@ -335,6 +350,105 @@ async def test_search_hits_are_frozen() -> None:
     hit = SearchHit(kind="video", id="vid00000001", title="T", thumbnail_url="https://x/t.jpg")
     with pytest.raises(ValidationError):
         hit.title = "mutated"  # type: ignore[misc]
+
+
+# ---- playlist cache --------------------------------------------------------
+
+
+async def test_playlist_cache_hit_skips_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    factory, _ = _ydl_factory(calls=calls)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    p1 = await adapter.playlist("PLtest")
+    p2 = await adapter.playlist("PLtest")
+    assert calls["n"] == 1
+    assert p1.title == p2.title == "P"
+
+
+async def test_playlist_cache_key_includes_start_and_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    factory, _ = _ydl_factory(calls=calls)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    await adapter.playlist("PLtest", start=1, limit=50)
+    await adapter.playlist("PLtest", start=1, limit=100)  # different limit -> miss
+    await adapter.playlist("PLtest", start=51, limit=50)  # different start -> miss
+    assert calls["n"] == 3
+
+
+async def test_playlist_cache_expiry_refetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    factory, _ = _ydl_factory(calls=calls)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    await adapter.playlist("PLtest")
+    key = ("PLtest", 1, adapter._PLAYLIST_DEFAULT_LIMIT)
+    info, _ = adapter._playlist_cache[key]
+    adapter._playlist_cache[key] = (info, time.time() - 1)
+    await adapter.playlist("PLtest")
+    assert calls["n"] == 2
+
+
+async def test_playlist_ttl_clamped_to_cache_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = MagicMock()
+    settings.playlist_cache_ttl_seconds = 10_000_000
+    monkeypatch.setattr(adapter, "get_settings", lambda: settings)
+    factory, _ = _ydl_factory()
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    before = time.time()
+    await adapter.playlist("PLtest")
+    key = ("PLtest", 1, adapter._PLAYLIST_DEFAULT_LIMIT)
+    _, expiry = adapter._playlist_cache[key]
+    assert before + adapter._CACHE_MAX_TTL - 5.0 <= expiry <= before + adapter._CACHE_MAX_TTL + 5.0
+
+
+async def test_playlist_write_sweeps_all_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A playlist-only session must still evict expired entries everywhere —
+    the video/search sweep sites never run on this path."""
+    factory, _ = _ydl_factory()
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    stale = time.time() - 10
+    adapter._stream_url_cache[("dead", 140)] = ("https://x", stale)
+    adapter._video_details_cache["dead"] = (MagicMock(), stale)
+    adapter._search_cache[("old", None, False, 20)] = ([], stale)
+    old_key = ("PLold", 1, 200)
+    adapter._playlist_cache[old_key] = (MagicMock(), stale)
+    await adapter.playlist("PLtest")
+    assert ("dead", 140) not in adapter._stream_url_cache
+    assert "dead" not in adapter._video_details_cache
+    assert ("old", None, False, 20) not in adapter._search_cache
+    assert old_key not in adapter._playlist_cache
+    assert ("PLtest", 1, adapter._PLAYLIST_DEFAULT_LIMIT) in adapter._playlist_cache
+
+
+async def test_concurrent_playlist_fetches_single_flight(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+    factory, _ = _ydl_factory(calls=calls, delay=0.05)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    results = await asyncio.gather(*(adapter.playlist("PLtest") for _ in range(5)))
+    assert calls["n"] == 1
+    assert all(r.title == "P" for r in results)
+    assert len({id(r) for r in results}) == 5
+    assert adapter._inflight_playlist == {}
+
+
+async def test_playlist_joiner_survives_creator_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same cancellation contract as video()/search() — see test_video_joiner_
+    survives_creator_cancellation for why."""
+    factory, _ = _ydl_factory(delay=0.3)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+
+    creator = asyncio.create_task(adapter.playlist("PLtest"))
+    await asyncio.sleep(0.05)
+    joiner = asyncio.create_task(adapter.playlist("PLtest"))
+    await asyncio.sleep(0.05)
+    assert ("PLtest", 1, adapter._PLAYLIST_DEFAULT_LIMIT) in adapter._inflight_playlist
+
+    creator.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    assert (await joiner).title == "P"
 
 
 # ---- failure / cancellation paths -----------------------------------------

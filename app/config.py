@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # time; the bounds here reject nonsense config at startup instead.
     video_cache_ttl_seconds: int = Field(3600, ge=1, le=3600)
     search_cache_ttl_seconds: int = Field(300, ge=1, le=3600)
+    playlist_cache_ttl_seconds: int = Field(300, ge=1, le=3600)
 
     # CORS — comma-separated origins; default localhost only
     cors_origins: str = "http://127.0.0.1,http://localhost"

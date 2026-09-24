@@ -11,7 +11,7 @@ from app.models import PlaylistInfo, PlaylistItem
 def app_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     from app.adapters import youtube as adapter
 
-    async def fake(playlist_id: str) -> PlaylistInfo:
+    async def fake(playlist_id: str, *, start: int = 1, limit: int = 200) -> PlaylistInfo:
         return PlaylistInfo(
             playlist_id=playlist_id,
             title="t",

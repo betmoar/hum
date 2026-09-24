@@ -12,6 +12,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let playlist = $state<PlaylistInfo | null>(null);
+  let loadingMore = $state(false);
 
   $effect(() => {
     let cancelled = false;
@@ -31,6 +32,29 @@
   // Playlist listings carry no cover of their own; the first track's
   // thumbnail is what YouTube shows as the playlist cover too.
   const cover = $derived(playlist?.items.find((i) => i.thumbnail_url)?.thumbnail_url ?? '');
+
+  // "Load more" pages in the next window starting right after what's loaded.
+  // The backend caches each (id, start, limit) window independently, so this
+  // is a fresh cheap request per page, not a re-fetch of everything so far.
+  async function loadMore() {
+    if (!playlist || !playlist.truncated || loadingMore) return;
+    loadingMore = true;
+    try {
+      const start = playlist.items.length + 1;
+      const next = await api.playlist(id, { start });
+      playlist = {
+        ...next,
+        items: [...playlist.items, ...next.items],
+      };
+    } catch (e) {
+      store.notify(
+        e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Could not load more.',
+        'error',
+      );
+    } finally {
+      loadingMore = false;
+    }
+  }
 
   function asHit(item: PlaylistItem): SearchHit {
     return {
@@ -78,7 +102,10 @@
   function enqueueAll() {
     if (!playlist || playlist.items.length === 0) return;
     store.enqueueStubs(playlist.items.map(stub));
-    store.notify(`Added ${playlist.items.length} tracks to queue.`, 'info');
+    const suffix = playlist.truncated
+      ? ` of ${playlist.video_count} (load more to add the rest).`
+      : '.';
+    store.notify(`Added ${playlist.items.length} tracks to queue${suffix}`, 'info');
   }
 </script>
 
@@ -97,16 +124,20 @@
         <h1>{playlist.title}</h1>
         <p class="byline">
           {#if playlist.author}<span class="author">{playlist.author}</span><span class="dot">&middot;</span>{/if}
-          <span>{playlist.video_count} video{playlist.video_count === 1 ? '' : 's'}</span>
+          {#if playlist.truncated}
+            <span>Showing {playlist.items.length} of {playlist.video_count} videos</span>
+          {:else}
+            <span>{playlist.video_count} video{playlist.video_count === 1 ? '' : 's'}</span>
+          {/if}
         </p>
         <div class="actions">
           <button class="primary" onclick={playAll} disabled={playlist.items.length === 0 || playAllInFlight}>
             <Icon name="play" size={18} />
-            Play all
+            {playlist.truncated ? 'Play loaded' : 'Play all'}
           </button>
           <button onclick={enqueueAll} disabled={playlist.items.length === 0}>
             <Icon name="list-plus" size={18} />
-            Enqueue all
+            {playlist.truncated ? 'Enqueue loaded' : 'Enqueue all'}
           </button>
         </div>
       </div>
@@ -119,6 +150,14 @@
         <p class="empty">No videos in this playlist.</p>
       {/each}
     </div>
+
+    {#if playlist.truncated}
+      <div class="load-more">
+        <button onclick={loadMore} disabled={loadingMore}>
+          {loadingMore ? 'Loading…' : `Load more (${playlist.video_count - playlist.items.length} remaining)`}
+        </button>
+      </div>
+    {/if}
   {/if}
 </section>
 
@@ -192,6 +231,14 @@
     display: flex;
     flex-direction: column;
     gap: var(--s-2);
+  }
+  .load-more {
+    display: flex;
+    justify-content: center;
+    margin-top: var(--s-5);
+  }
+  .load-more button {
+    padding: 10px 20px;
   }
   .empty {
     color: var(--ink-muted);

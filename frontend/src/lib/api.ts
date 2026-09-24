@@ -108,6 +108,11 @@ export const api = {
   channel: (id: string): Promise<ChannelInfo> =>
     request<ChannelInfo>(`/api/channel/${id}`).then(cleanChannel),
 
-  playlist: (id: string): Promise<PlaylistInfo> =>
-    request<PlaylistInfo>(`/api/playlist/${id}`).then(cleanPlaylist),
+  playlist: (id: string, opts?: { start?: number; limit?: number }): Promise<PlaylistInfo> => {
+    const params = new URLSearchParams();
+    if (opts?.start != null) params.set('start', String(opts.start));
+    if (opts?.limit != null) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return request<PlaylistInfo>(`/api/playlist/${id}${qs ? '?' + qs : ''}`).then(cleanPlaylist);
+  },
 };
