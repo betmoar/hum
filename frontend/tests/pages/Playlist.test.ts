@@ -151,3 +151,107 @@ describe('Playlist page — Play all ordering + in-flight guard (review finding 
     await waitFor(() => expect(storeMod.store.player.current?.videoId).toBe('a'));
   });
 });
+
+describe('Playlist page — truncation + Load more (#19)', () => {
+  const truncatedPlaylist: PlaylistInfo = {
+    playlist_id: 'PLbig',
+    title: 'Huge Mix',
+    author: 'Some Channel',
+    video_count: 500,
+    truncated: true,
+    items: [
+      { video_id: 'aaa', title: 'Track A', author: 'Artist A', duration_seconds: 100, thumbnail_url: '' },
+      { video_id: 'bbb', title: 'Track B', author: 'Artist B', duration_seconds: 200, thumbnail_url: '' },
+    ],
+  };
+
+  it('shows "Showing N of M videos" and a Load more button when truncated', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue(truncatedPlaylist);
+    const { findByText } = render(Playlist, { props: { id: 'PLbig' } });
+
+    expect(await findByText('Showing 2 of 500 videos')).toBeTruthy();
+    expect(await findByText('Load more (498 remaining)')).toBeTruthy();
+    expect(await findByText('Play loaded')).toBeTruthy();
+    expect(await findByText('Enqueue loaded')).toBeTruthy();
+  });
+
+  it('does not show Load more / "Showing N of M" when not truncated', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue(samplePlaylist);
+    const { findByText, queryByText } = render(Playlist, { props: { id: 'PL123' } });
+    await findByText('Great Mix');
+
+    expect(queryByText(/load more/i)).toBeNull();
+    expect(queryByText(/showing/i)).toBeNull();
+    expect(await findByText('2 videos')).toBeTruthy();
+  });
+
+  it('Load more fetches the next window with start=items.length+1 and appends items', async () => {
+    const playlistSpy = vi.spyOn(api, 'playlist').mockResolvedValueOnce(truncatedPlaylist);
+    const { findByText, getByText, queryByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Track B');
+
+    playlistSpy.mockResolvedValueOnce({
+      ...truncatedPlaylist,
+      truncated: false,
+      items: [
+        { video_id: 'ccc', title: 'Track C', author: 'Artist C', duration_seconds: 300, thumbnail_url: '' },
+      ],
+    });
+
+    const loadMoreBtn = getByText(/load more/i);
+    await fireEvent.click(loadMoreBtn);
+
+    expect(await findByText('Track C')).toBeTruthy();
+    expect(playlistSpy).toHaveBeenCalledTimes(2);
+    expect(playlistSpy).toHaveBeenLastCalledWith('PLbig', { start: 3 });
+    // Items from the first page are still present; the response now reports
+    // truncated: false, so the byline switches from "Showing N of M" to a
+    // plain count and the Load more button disappears.
+    expect(await findByText('Track A')).toBeTruthy();
+    expect(await findByText('Track B')).toBeTruthy();
+    expect(getByText('500 videos')).toBeTruthy();
+    expect(queryByText(/load more/i)).toBeNull();
+  });
+
+  it('a failed Load more notifies and re-enables the button', async () => {
+    const storeMod = await import('../../src/lib/store.svelte');
+    const notify = vi.spyOn(storeMod.store, 'notify').mockImplementation(() => {});
+    const playlistSpy = vi.spyOn(api, 'playlist').mockResolvedValueOnce(truncatedPlaylist);
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Track B');
+    playlistSpy.mockRejectedValueOnce(new ApiError(502, 'UPSTREAM_FAILURE'));
+    await fireEvent.click(getByText(/load more/i));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith(expect.any(String), 'error'));
+    const btn = await findByText(/load more \(/i);
+    expect((btn.closest('button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('Load more uses the backend next_start cursor, not items.length', async () => {
+    // Two unavailable entries were filtered out of the first 4-position window:
+    // items.length + 1 would be 3 and re-fetch positions 3-4.
+    const playlistSpy = vi.spyOn(api, 'playlist').mockResolvedValueOnce({ ...truncatedPlaylist, next_start: 5 });
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Track B');
+    playlistSpy.mockResolvedValueOnce({ ...truncatedPlaylist, truncated: false, next_start: null, items: [] });
+    await fireEvent.click(getByText(/load more/i));
+    await waitFor(() => expect(playlistSpy).toHaveBeenLastCalledWith('PLbig', { start: 5 }));
+  });
+
+  it('enqueueAll on a truncated playlist notifies with the "load more to add the rest" suffix', async () => {
+    vi.spyOn(api, 'playlist').mockResolvedValue(truncatedPlaylist);
+    const storeMod = await import('../../src/lib/store.svelte');
+    storeMod.store.clear();
+    const notifySpy = vi.spyOn(storeMod.store, 'notify').mockImplementation(() => {});
+
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Huge Mix');
+
+    await fireEvent.click(getByText('Enqueue loaded'));
+
+    await waitFor(() => expect(storeMod.store.queue).toHaveLength(2));
+    expect(notifySpy).toHaveBeenCalledWith(
+      'Added 2 tracks to queue of 500 (load more to add the rest).',
+      'info',
+    );
+  });
+});

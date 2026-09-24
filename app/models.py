@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 VideoID = Annotated[str, Field(min_length=11, max_length=11, pattern=r"^[A-Za-z0-9_-]{11}$")]
 
@@ -91,3 +91,19 @@ class PlaylistInfo(BaseModel):
     author: str | None = None
     video_count: int
     items: list[PlaylistItem]
+    # True when `items` is a prefix of the full playlist (video_count > len(items)
+    # alone is not reliable: video_count can also be under-reported by YouTube
+    # for very large or partially-restricted playlists, or the fetch window can
+    # start beyond 0). Explicit signal so the frontend never has to infer it.
+    truncated: bool = False
+    # 1-based `start` for the next window, or None at the end. Counts raw
+    # playlist positions, so it stays right when unavailable entries were
+    # filtered out of `items` (len(items) would under-count and overlap).
+    next_start: int | None = None
+
+    @model_validator(mode="after")
+    def _cursor_matches_truncation(self) -> PlaylistInfo:
+        # The frontend pages with next_start exactly when truncated.
+        if self.truncated != (self.next_start is not None):
+            raise ValueError("next_start must be set exactly when truncated")
+        return self

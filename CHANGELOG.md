@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-24
+
+### Added
+
+- **Resume where you left off**: the playing track and its position persist
+  across reloads; a restored track comes back paused at that position. Long
+  VOD (≥ 10 min) also keeps a per-video resume bookmark, cleared when the track
+  ends or within 30 s of the end.
+- **History and Previous**: played tracks are kept (last 50, persisted).
+  Previous goes back to the prior track within the first 3 s, otherwise
+  restarts the current one; live always goes back.
+- **Lock-screen / headset seeking**: Media Session `seekto`, `seekbackward`,
+  `seekforward` and position state for VOD (cleared for live).
+- **"Can't reach Hum server."**: when Hum itself is down (as opposed to
+  YouTube failing), a sticky toast with Retry replaces the codec-swap/refetch
+  recovery, which would only burn its one-shot slots.
+- **Playlist paging** (#19): `/api/playlist/{id}` takes `?start=&limit=`
+  (default and max 200) and returns `truncated` and a `next_start` cursor; the
+  playlist page shows "Showing N of M" and a Load more button. Playlist
+  responses are cached for `PLAYLIST_CACHE_TTL_SECONDS` (default 300, capped at
+  1 h), with concurrent identical requests collapsed onto one extraction.
+
+### Changed
+
+- **Settings is a dialog, not a page** (#17): opening it no longer unmounts the
+  page underneath, so a search query and its results survive. `#/settings`
+  links still work (they open the dialog over `#/`).
+- **Faster video lookups** (#18): single-video extractions reuse one yt-dlp
+  instance per worker thread, keeping YouTube's parsed player JS. Measured on 5
+  cold videos: p50 2.17–2.36 s → 1.41–1.51 s.
+
+### Fixed
+
+- Repeat-one (and repeat-all with a single track) now actually replays.
+- Restored tracks regain their format list on refetch, so codec fallback works
+  for them too.
+
 ## [0.2.0] - 2026-09-24
 
 ### Changed

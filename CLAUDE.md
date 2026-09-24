@@ -46,8 +46,9 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
 - Signing payload formats in `app/auth.py` ⇄ every URL-minting site
   (`app/api/video.py`, `app/api/live.py`) ⇄ every verifying route. The payload embeds
   the route path (e.g. `/proxy/audio/{id}`) — renaming a route invalidates its URLs.
-- `Track` gains a signed-URL field ⇒ strip it in `store.svelte.ts` `#flush()` **and**
-  the queue-rehydrate map (both marked with comments).
+- `Track` gains a signed-URL field ⇒ strip it in `stripSignedUrls()` in
+  `store.svelte.ts` — the single strip point for queue, history and the persisted
+  current track (flush and rehydrate both go through it).
 - New route ⇒ must carry `Depends(require_bearer)` or a `sig` query param, or
   `test_invariant_3_every_route_is_authed_or_signed` fails (public routes go in its
   `_PUBLIC_PATHS` with justification).
@@ -60,6 +61,10 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
   streams are normal; adding a total timeout kills them mid-track.
 - **`_stream_url_cache` is written from `asyncio.to_thread` workers** and read from the
   event loop. Single dict ops only (GIL-atomic). Don't add compound read-modify-write.
+- **Single-video extractions reuse one `YoutubeDL` per worker thread** (`_video_ydl`,
+  thread-local). It keeps the parsed player JS (~20% of a cold lookup). A `YoutubeDL` is
+  not thread-safe: never share one instance across threads. Listings (extra opts) still
+  build a fresh one per call.
 - **YouTube's `expire=` param is trusted but clamped** to 1 h (`_CACHE_MAX_TTL`). The
   cache can still go stale early (IP change invalidates URLs) — the frontend's
   `handleError` → refetch path is the recovery, keyed by status codes, which is why
@@ -72,6 +77,14 @@ test's message and `docs/PLAYBOOKS.md` before "fixing" the test.
 - **`sign_live_manifest_url` / `sign_live_segment_url` use distinct payload prefixes**
   (`live-manifest|`, `live-segment|`) to prevent cross-protocol signature reuse. Any
   new signed URL type needs its own prefix. See PLAYBOOKS.
+- **Behaviour questions go through `frontend/src/lib/contentKind.ts`**
+  (`usesHls`, `isSeekable`, `isBookmarkable`, `isAirplayRoutable`, `hasDuration`),
+  not `t.isLive`. Only data reads (rendering the LIVE pill, building a Track) read
+  the field. A new kind of content is a new row in that table.
+- **`ApiError.status === 0` means Hum itself is unreachable** (fetch rejected), as
+  opposed to a 5xx where Hum answered but YouTube failed. `Player.handleError`
+  probes `/health` before its codec-swap/refetch ladder so a downed server shows
+  "Can't reach Hum server." instead of burning one-shot recovery slots.
 - **pytest deselects integration tests by default** (`-m 'not integration'` in
   `pyproject.toml` addopts). CI never talks to YouTube.
 

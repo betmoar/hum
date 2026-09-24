@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # App
     app_name: str = "Hum"
-    app_version: str = "0.2.0"
+    app_version: str = "0.2.1"
     debug: bool = False
 
     # Server
@@ -27,10 +27,11 @@ class Settings(BaseSettings):
     stream_url_ttl_seconds: int = 21600  # 6h
 
     # Caching (adapter-level, in-memory)
-    # Both are additionally clamped to the adapter's _CACHE_MAX_TTL at write
+    # All three are additionally clamped to the adapter's _CACHE_MAX_TTL at write
     # time; the bounds here reject nonsense config at startup instead.
     video_cache_ttl_seconds: int = Field(3600, ge=1, le=3600)
     search_cache_ttl_seconds: int = Field(300, ge=1, le=3600)
+    playlist_cache_ttl_seconds: int = Field(300, ge=1, le=3600)
 
     # CORS — comma-separated origins; default localhost only
     cors_origins: str = "http://127.0.0.1,http://localhost"

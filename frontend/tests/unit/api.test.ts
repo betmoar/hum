@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { api, ApiError } from '../../src/lib/api';
+import { api, ApiError, isUnreachable } from '../../src/lib/api';
 import { store } from '../../src/lib/store.svelte';
 
 beforeEach(() => {
@@ -221,5 +221,31 @@ describe('api.radio', () => {
     const url = (globalThis.fetch as any).mock.calls[0][0];
     expect(url).toContain('/api/radio');
     expect(url).toContain('limit=30');
+  });
+});
+
+describe('api — unreachable Hum server', () => {
+  it('fetch rejection becomes ApiError status 0', async () => {
+    store.setToken('T');
+    (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+    await expect(api.video('x')).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('health resolves on 200 and does not send bearer', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+    await expect(api.health()).resolves.toBeUndefined();
+    const call = (globalThis.fetch as any).mock.calls[0];
+    expect(call[0]).toBe('/health');
+    expect(call[1]?.headers).toBeUndefined();
+    // Bounded: a half-open connection must not stall recovery forever.
+    expect(call[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('health rejection is status 0; isUnreachable detects it', async () => {
+    (globalThis.fetch as any).mockRejectedValue(new TypeError('x'));
+    const e = await api.health().catch((x) => x);
+    expect(isUnreachable(e)).toBe(true);
+    expect(isUnreachable(new ApiError(502, 'x'))).toBe(false);
+    expect(isUnreachable(new Error('x'))).toBe(false);
   });
 });

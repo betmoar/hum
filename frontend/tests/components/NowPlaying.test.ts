@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import NowPlaying from '../../src/components/NowPlaying.svelte';
@@ -61,5 +61,32 @@ describe('NowPlaying — AirPlay button gating', () => {
     store.player.airplayCapable = true;
     await tick();
     expect(container.querySelector('[aria-label="AirPlay"]')).not.toBeNull();
+  });
+});
+
+describe('NowPlaying — previous', () => {
+  it('prev button is labelled Previous track and calls store.previous', async () => {
+    const spy = vi.spyOn(store, 'previous').mockImplementation(() => {});
+    store.playNow(sampleTrack('p', '/proxy/audio/p?x'));
+    store.expandPlayer();
+    const { getByLabelText } = render(NowPlaying);
+    await tick();
+    getByLabelText('Previous track').click();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe('NowPlaying — previous on live', () => {
+  it('shows the Previous button for a live track', async () => {
+    store.player.current = {
+      videoId: 'live1', title: 'L', author: 'a', durationSeconds: 0,
+      thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
+      liveStreamUrl: '/api/live/live1/manifest.m3u8?exp=1&sig=x',
+    };
+    store.expandPlayer();
+    const { container } = render(NowPlaying);
+    await tick();
+    expect(container.querySelector('[aria-label="Previous track"]')).not.toBeNull();
   });
 });

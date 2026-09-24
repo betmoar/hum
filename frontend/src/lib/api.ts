@@ -14,6 +14,15 @@ export class ApiError extends Error {
   }
 }
 
+// Status 0 is reserved: the request never reached Hum (server down, Wi-Fi
+// gone, laptop asleep). Distinct from a 5xx, which means Hum answered but
+// YouTube failed. Recovery UI keys off the difference.
+const HEALTH_TIMEOUT_MS = 3000;
+
+export function isUnreachable(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 0;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = store.settings.bearerToken;
   if (!token) throw new ApiError(401, 'no bearer token');
@@ -23,7 +32,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     Authorization: `Bearer ${token}`,
   };
 
-  const resp = await fetch(path, { ...init, headers });
+  let resp: Response;
+  try {
+    resp = await fetch(path, { ...init, headers });
+  } catch {
+    throw new ApiError(0, 'hum server unreachable');
+  }
 
   if (resp.status === 401) {
     store.invalidateToken();
@@ -64,6 +78,20 @@ function buildSearchUrl(q: string, limit: number, opts?: SearchOpts): string {
 }
 
 export const api = {
+  // Public liveness probe (app/main.py /health, no bearer). The player uses
+  // it to tell "Hum is down" from "this stream failed".
+  health: async (): Promise<void> => {
+    let r: Response;
+    try {
+      // Bounded: a half-open connection must not stall recovery. No answer
+      // within HEALTH_TIMEOUT_MS on a LAN counts as unreachable.
+      r = await fetch('/health', { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+    } catch {
+      throw new ApiError(0, 'hum server unreachable');
+    }
+    if (!r.ok) throw new ApiError(r.status, 'unhealthy');
+  },
+
   search: (q: string, limit: number = 20, opts?: SearchOpts): Promise<SearchResponse> =>
     request<SearchResponse>(buildSearchUrl(q, limit, opts)).then(cleanSearch),
 
@@ -80,6 +108,11 @@ export const api = {
   channel: (id: string): Promise<ChannelInfo> =>
     request<ChannelInfo>(`/api/channel/${id}`).then(cleanChannel),
 
-  playlist: (id: string): Promise<PlaylistInfo> =>
-    request<PlaylistInfo>(`/api/playlist/${id}`).then(cleanPlaylist),
+  playlist: (id: string, opts?: { start?: number; limit?: number }): Promise<PlaylistInfo> => {
+    const params = new URLSearchParams();
+    if (opts?.start != null) params.set('start', String(opts.start));
+    if (opts?.limit != null) params.set('limit', String(opts.limit));
+    const qs = params.toString();
+    return request<PlaylistInfo>(`/api/playlist/${id}${qs ? '?' + qs : ''}`).then(cleanPlaylist);
+  },
 };

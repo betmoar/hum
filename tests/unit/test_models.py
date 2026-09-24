@@ -1,6 +1,9 @@
 """Smoke tests for response models."""
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from app.models import (
     AudioFormat,
     ChannelInfo,
@@ -84,3 +87,10 @@ def test_video_details_accepts_live_fields() -> None:
     )
     assert d.is_live is True
     assert d.live_stream_url == "/api/live/abc12345678/manifest.m3u8"
+
+
+@pytest.mark.parametrize("truncated,next_start", [(False, 5), (True, None)])
+def test_playlist_info_cursor_must_match_truncation(truncated: bool, next_start: int | None) -> None:
+    with pytest.raises(ValidationError):
+        PlaylistInfo(playlist_id="p", title="t", video_count=9, items=[],
+                     truncated=truncated, next_start=next_start)

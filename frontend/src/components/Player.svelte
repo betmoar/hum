@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { store, playerControls } from '../lib/store.svelte';
   import { formatDuration } from '../lib/format';
-  import { api } from '../lib/api';
+  import { api, isUnreachable } from '../lib/api';
   import { pickForTier } from '../lib/pickAudio';
   import { detectAudioEnv } from '../lib/browserEnv';
   import type { Track } from '../lib/types';
@@ -9,6 +10,15 @@
   import Marquee from './Marquee.svelte';
   import LivePill from './LivePill.svelte';
   import { createAirplayControl } from '../lib/airplay.svelte';
+  import { usesHls, isSeekable, isAirplayRoutable, isBookmarkable, hasDuration } from '../lib/contentKind';
+  import { saveBookmark, clearBookmark } from '../lib/bookmarks';
+
+  // How often the playhead is written to the store (persisted current
+  // position) and to the resume bookmark while playing. Pause and pagehide
+  // write immediately regardless.
+  const POSITION_SAVE_INTERVAL_MS = 5000;
+  // Default step for lock-screen / headset seek-backward / seek-forward.
+  const SEEK_STEP_S = 10;
 
   const airplay = createAirplayControl();
   let airplaySupported = $state(false);
@@ -21,7 +31,7 @@
     document.createElement('audio').canPlayType('application/vnd.apple.mpegurl') !== '';
 
   function pickVodSrc(t: Track | null): string | undefined {
-    if (!t || t.isLive) return undefined;
+    if (!t || usesHls(t)) return undefined;
     if (hlsNative && t.hlsUrl) return t.hlsUrl;
     return t.audioUrl || undefined;
   }
@@ -30,7 +40,12 @@
   // uncaught rejection is console noise at best. Route every imperative play
   // through here.
   function safePlay(a: HTMLAudioElement | null) {
-    void a?.play().catch(() => { /* requires user gesture / interrupted */ });
+    try {
+      // play() may return undefined (older engines, jsdom) — don't chain on it.
+      void a?.play()?.catch(() => { /* requires user gesture / interrupted */ });
+    } catch {
+      /* not supported */
+    }
   }
 
   let el = $state<HTMLAudioElement | null>(null);
@@ -118,6 +133,7 @@
       toggleMute: () => { if (el) el.muted = !el.muted; },
       showPlaybackTargetPicker: () => airplay.showPicker(),
       getPosition: () => el?.currentTime ?? 0,
+      seekTo: (s: number) => { if (el) el.currentTime = Math.max(0, s); },
       restoreAt: (pos: number) => {
         const a = el;
         if (!a) return;
@@ -161,7 +177,7 @@
   // flag on it would never re-render NowPlaying when the availability event
   // arrives post-mount.
   let airplayCapable = $derived(
-    airplaySupported && airplay.state.available && !store.player.current?.isLive
+    airplaySupported && airplay.state.available && isAirplayRoutable(store.player.current)
   );
   $effect(() => {
     store.player.airplayCapable = airplayCapable;
@@ -170,9 +186,12 @@
   // Reset Media Session metadata when the underlying videoId changes (not on
   // every recovery URL swap).
   let currentVideoId = $derived(store.player.current?.videoId ?? null);
+  let startArmedFor: string | null = null;
   $effect(() => {
     const id = currentVideoId;
-    if (!id) return;
+    // Nothing playing ends the session: the same video picked again later
+    // must re-arm its start seek (bookmark).
+    if (!id) { startArmedFor = null; return; }
     const t = store.player.current;
     if (t && 'mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -184,11 +203,114 @@
         navigator.mediaSession.setActionHandler('play',  () => safePlay(el));
         navigator.mediaSession.setActionHandler('pause', () => el?.pause());
         navigator.mediaSession.setActionHandler('nexttrack', () => store.next());
-        navigator.mediaSession.setActionHandler('previoustrack', () => restart());
+        navigator.mediaSession.setActionHandler('previoustrack', () => store.previous());
       } catch {
         // Some browsers don't support all actions.
       }
+      // Seek actions only make sense for seekable content; null clears a
+      // handler left over from the previous track. Each call is separately
+      // guarded because unsupported actions throw.
+      const seekable = isSeekable(t);
+      const seekHandlers: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+        ['seekto', seekable ? (d) => { if (el && d.seekTime != null) el.currentTime = Math.max(0, d.seekTime); } : null],
+        ['seekbackward', seekable ? (d) => { if (el) el.currentTime = Math.max(0, el.currentTime - (d.seekOffset ?? SEEK_STEP_S)); } : null],
+        ['seekforward', seekable ? (d) => { if (el) el.currentTime = el.currentTime + (d.seekOffset ?? SEEK_STEP_S); } : null],
+      ];
+      for (const [action, handler] of seekHandlers) {
+        try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* unsupported */ }
+      }
     }
+    // Resume point: restored position (once), else a long-VOD bookmark.
+    // restoreAt waits for the new source's loadedmetadata, which covers the
+    // rehydrate case where the src only arrives after a refetch.
+    // Only on a real videoId change: this effect also re-runs when a
+    // recovery/quality swap replaces the current object, and re-arming then
+    // would override switchQuality's own restoreAt with a stale bookmark.
+    // untrack: startPositionFor reads positionSeconds, which must not become
+    // a dependency (it changes every POSITION_SAVE_INTERVAL_MS).
+    if (t && id !== startArmedFor) {
+      startArmedFor = id;
+      untrack(() => {
+        const start = store.startPositionFor(t);
+        if (start > 0) playerControls.current?.restoreAt?.(start);
+        // Don't rely on the autoplay attribute alone: a browser that fires
+        // `pause` while aborting the old load would flip isPlaying (and so
+        // autoplay) off before the new source is ready. play() here is
+        // queued against the new src. Live tracks start via hls.js.
+        if (store.player.isPlaying && !usesHls(t)) safePlay(el);
+      });
+    }
+  });
+
+  // Lock-screen / OS media controls: keep the scrubbable position in sync.
+  // Live has no meaningful duration, so its state is cleared instead.
+  function updatePositionState() {
+    if (!el || typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    if (typeof ms.setPositionState !== 'function') return;
+    try {
+      const d = el.duration;
+      if (hasDuration(store.player.current) && Number.isFinite(d) && d > 0) {
+        ms.setPositionState({
+          duration: d,
+          position: Math.min(Math.max(0, el.currentTime), d),
+          playbackRate: el.playbackRate || 1,
+        });
+      } else {
+        ms.setPositionState();
+      }
+    } catch {
+      // Throws on inconsistent values mid-load; the next event corrects it.
+    }
+  }
+
+  // videoId whose media is actually loaded in the element. Set on
+  // loadedmetadata, cleared on emptied (fired when a new src starts loading).
+  // Guards savePosition: during a track switch `store.player.current` is
+  // already the NEW track while the element still reports the OLD playhead,
+  // and writing that would plant the old position on the new track.
+  let loadedVideoId: string | null = null;
+
+  function onLoadedMetadata() {
+    loadedVideoId = store.player.current?.videoId ?? null;
+    updatePositionState();
+  }
+
+  let lastSaveAt = 0;
+  function savePosition() {
+    const t = store.player.current;
+    if (!el || !t || !isSeekable(t) || loadedVideoId !== t.videoId) return;
+    lastSaveAt = Date.now();
+    const p = el.currentTime;
+    store.setPosition(p);
+    if (isBookmarkable(t)) {
+      const d = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : t.durationSeconds;
+      saveBookmark(t.videoId, p, d);
+    }
+  }
+
+  function onTimeUpdate() {
+    if (Date.now() - lastSaveAt >= POSITION_SAVE_INTERVAL_MS) savePosition();
+  }
+
+  function onPause() {
+    store.player.isPlaying = false;
+    savePosition();
+    updatePositionState();
+  }
+
+  function onPlay() {
+    store.player.isPlaying = true;
+    updatePositionState();
+  }
+
+  // A closing tab doesn't fire pause; pagehide is the last reliable hook
+  // (unlike beforeunload it also fires on iOS and bfcache navigations).
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const onHide = () => savePosition();
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
   });
 
   // Live track mount: dynamically import hls.js and attach it to the audio
@@ -198,7 +320,7 @@
   // On iOS Safari (no MSE) we fall back to native HLS via the src attribute.
   $effect(() => {
     const t = store.player.current;
-    if (!el || !t?.isLive || !t.liveStreamUrl) return;
+    if (!el || !usesHls(t) || !t?.liveStreamUrl) return;
 
     let cancelled = false;
     let hls: import('hls.js').default | null = null;
@@ -252,7 +374,10 @@
           hls.on(Hls.Events.FRAG_BUFFERED, () => {
             if (playStarted) return;
             playStarted = true;
-            void audio.play().catch(() => { /* user-gesture required */ });
+            // A live track restored on reload stays paused (spec R1.2).
+            if (untrack(() => store.player.isPlaying)) {
+              void audio.play().catch(() => { /* user-gesture required */ });
+            }
           });
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (!data.fatal) return;
@@ -271,7 +396,9 @@
           hls.attachMedia(audio);
         } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
           audio.src = src;
-          void audio.play().catch(() => { /* user-gesture required */ });
+          if (untrack(() => store.player.isPlaying)) {
+            void audio.play().catch(() => { /* user-gesture required */ });
+          }
         } else {
           store.notify('Live playback is not supported in this browser.', 'error');
         }
@@ -311,7 +438,7 @@
   // when liveStreamUrl is missing.
   $effect(() => {
     const t = store.player.current;
-    if (!t || t.isLive || pickVodSrc(t)) return;
+    if (!t || usesHls(t) || pickVodSrc(t)) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
       // A stub queued from a playlist listing can turn out to be live: switch
@@ -335,6 +462,9 @@
         same = pickForTier(fresh.audio_formats, tierUsed, detectAudioEnv()) ?? fresh.audio_formats[0];
       }
       if (same) {
+        // itag/bitrate follow the chosen format (it may be the fallback), and
+        // _formats comes back so codec-fallback recovery works for restored
+        // tracks too (it was stripped on persist).
         store.player.current = {
           ...t,
           audioUrl: same.url,
@@ -347,8 +477,10 @@
       } else {
         skipUnplayableRehydrate(t);
       }
-    }).catch(() => {
-      skipUnplayableRehydrate(t);
+    }).catch((e) => {
+      // Hum down: don't skip — every queued track would fail the same way.
+      if (isUnreachable(e)) store.notifyUnreachable(retryCurrent);
+      else skipUnplayableRehydrate(t);
     });
   });
 
@@ -356,14 +488,15 @@
   // (stripped on flush), refetch via api.video for a fresh signed URL.
   $effect(() => {
     const t = store.player.current;
-    if (!t?.isLive || t.liveStreamUrl) return;
+    if (!t || !usesHls(t) || t.liveStreamUrl) return;
     api.video(t.videoId).then((fresh) => {
       if (store.player.current?.videoId !== t.videoId) return;
       if (fresh.is_live && fresh.live_stream_url) {
         store.player.current = { ...t, liveStreamUrl: fresh.live_stream_url };
       }
-    }).catch(() => {
-      store.notify('Could not load this live stream.', 'error');
+    }).catch((e) => {
+      if (isUnreachable(e)) store.notifyUnreachable(retryCurrent);
+      else store.notify('Could not load this live stream.', 'error');
     });
   });
 
@@ -382,12 +515,25 @@
     }
   }
 
+  // onended only. A manual skip (Next button, key, lock screen) keeps the
+  // resume point; finishing the track is what clears it.
   function advance() {
+    const t = store.player.current;
+    if (t) clearBookmark(t.videoId);
     store.next();
   }
 
-  function restart() {
-    if (el) el.currentTime = 0;
+  // Retry for a track that still has its URL: reloading re-enters the error
+  // path (and so handleError's ladder) if it still fails.
+  function reloadCurrent() {
+    if (el) { el.load(); safePlay(el); }
+  }
+
+  // Re-run the rehydrate effects for the current track: a fresh object with
+  // the same videoId re-triggers them without touching history.
+  function retryCurrent() {
+    const t = store.player.current;
+    if (t) store.player.current = { ...t };
   }
 
   async function handleError() {
@@ -396,10 +542,22 @@
     // Live tracks: hls.js owns recovery (network restart, media recover,
     // fatal-error toast). Audio-element errors during hls.js playback are
     // already routed through hls.js's own error events.
-    if (t.isLive) return;
+    if (usesHls(t)) return;
     // If the playable URL is empty, the dedicated rehydrate $effect owns
     // refetching. Don't double-fetch and don't consume the retry slot.
     if (!pickVodSrc(t)) return;
+
+    // Is Hum itself reachable? If not, nothing below can succeed and each
+    // step would burn a one-shot slot (codec swap, refetch) on a failure
+    // that isn't the stream's. Say what's actually wrong instead.
+    const unreachable = await api.health().then(() => false, isUnreachable);
+    // The user may have picked another track during the probe; recovering
+    // the old one now would overwrite it.
+    if (store.player.current?.videoId !== t.videoId) return;
+    if (unreachable) {
+      store.notifyUnreachable(reloadCurrent);
+      return;
+    }
 
     // Codec fallback path: if the track carries _formats and an untried
     // alternate-codec format exists, swap codec ONCE silently before
@@ -426,13 +584,10 @@
             // qualityTier is preserved — fallback doesn't change user intent
           };
           store.player.current = next;
-          if (el) {
-            el.addEventListener(
-              'loadedmetadata',
-              () => { if (el) el.currentTime = lastPos; },
-              { once: true },
-            );
-          }
+          // Through restoreAt (not a raw listener) so it replaces — rather
+          // than races — a still-pending start seek; at 0 the pending start
+          // seek (resume point) is left to fire.
+          if (lastPos > 0) playerControls.current?.restoreAt?.(lastPos);
           return;
         }
       }
@@ -458,6 +613,7 @@
     recoveredVideoIds.add(t.videoId);
     try {
       const fresh = await api.video(t.videoId);
+      if (store.player.current?.videoId !== t.videoId) return;
       const same = fresh.audio_formats.find((f) => f.itag === t.itag);
       if (same) {
         const lastPos = pos;
@@ -467,12 +623,17 @@
           hlsUrl: same.hls_url ?? undefined,
         };
         store.player.current = next;
-        if (el) {
-          el.addEventListener('loadedmetadata', () => { if (el) el.currentTime = lastPos; }, { once: true });
-        }
+        if (lastPos > 0) playerControls.current?.restoreAt?.(lastPos);
       }
-    } catch {
-      // Give up silently; user can hit Play again.
+    } catch (e) {
+      // Hum went down between the healthy probe and this refetch: that's not
+      // this stream's failure, so give the recovery slot back and say what
+      // is actually wrong (only if the user is still on this track).
+      if (isUnreachable(e)) {
+        recoveredVideoIds.delete(t.videoId);
+        if (store.player.current?.videoId === t.videoId) store.notifyUnreachable(reloadCurrent);
+      }
+      // Otherwise give up silently; user can hit Play again.
     }
   }
 </script>
@@ -491,7 +652,14 @@
       preload="metadata"
       onended={advance}
       onerror={handleError}
-      autoplay
+      onplay={onPlay}
+      onpause={onPause}
+      ontimeupdate={onTimeUpdate}
+      onloadedmetadata={onLoadedMetadata}
+      onemptied={() => { loadedVideoId = null; }}
+      onseeked={updatePositionState}
+      onratechange={updatePositionState}
+      autoplay={store.player.isPlaying}
       {...{ 'x-webkit-airplay': 'allow' }}
     ></audio>
 
@@ -527,11 +695,10 @@
         >
           <Icon name="shuffle" size={18} />
         </button>
-        {#if !store.player.current.isLive}
-          <button class="ctrl" onclick={restart} aria-label="Restart track">
-            <Icon name="skip-back" size={20} />
-          </button>
-        {/if}
+        <!-- Always shown: previous() handles live (goes back to history). -->
+        <button class="ctrl" onclick={() => store.previous()} aria-label="Previous track">
+          <Icon name="skip-back" size={20} />
+        </button>
         <button
           class="ctrl ctrl-play"
           onclick={() => paused ? safePlay(el) : el?.pause()}
@@ -543,7 +710,7 @@
             <Icon name="pause" size={22} />
           {/if}
         </button>
-        <button class="ctrl" onclick={advance} aria-label="Next track">
+        <button class="ctrl" onclick={() => store.next()} aria-label="Next track">
           <Icon name="skip-forward" size={20} />
         </button>
         <button

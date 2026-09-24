@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import shutil
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -50,6 +51,13 @@ _inflight_refresh: dict[str, asyncio.Task[None]] = {}
 # re-extraction (expensive: ~2 s of HTTPS + deno challenge solving).
 _CACHE_MAX_TTL = 3600.0  # 1 hour
 
+# Default page size for /api/playlist. A giant (multi-thousand item) playlist
+# extraction is one yt-dlp request either way, but the response body and the
+# per-item thumbnail fetches it drives client-side both scale with it — this
+# caps a single request to a reasonable page. Callers can page further with
+# ?start=&limit= (see api/playlist.py).
+_PLAYLIST_DEFAULT_LIMIT = 200
+
 # Cache: video_id -> (VideoDetails, expiry_epoch). Holds the canonical UNSIGNED
 # copy — /api/video signs by MUTATING the object it gets, so readers always
 # receive model_copy(deep=True), never the cached instance. Live videos are
@@ -71,6 +79,17 @@ _inflight_video: dict[str, asyncio.Task[VideoDetails]] = {}
 # In-flight search() fetches, keyed by the same tuple as _search_cache.
 # Self-cleaning: popped in a done-callback.
 _inflight_search: dict[tuple[str, str | None, bool, int], asyncio.Task[list[SearchHit]]] = {}
+
+# Cache: (playlist_id, start, limit) -> (PlaylistInfo, expiry_epoch). Holds the
+# canonical copy; readers get model_copy(deep=True) (see _video_details_cache
+# comment — /api/playlist doesn't mutate today, but this keeps the same shape
+# as the other two metadata caches so a future signing step can't poison it).
+# Read/write logic lives in playlist(); swept by _evict_expired.
+_playlist_cache: dict[tuple[str, int, int], tuple[PlaylistInfo, float]] = {}
+
+# In-flight playlist() fetches, keyed by the same tuple as _playlist_cache.
+# Self-cleaning: popped in a done-callback.
+_inflight_playlist: dict[tuple[str, int, int], asyncio.Task[PlaylistInfo]] = {}
 
 
 class YouTubeError(Exception):
@@ -167,9 +186,27 @@ _VIDEO_MIME = {"mp4": "video/mp4", "webm": "video/webm"}
 
 
 def _make_ydl(opts: dict[str, Any]) -> Any:
-    """Factory seam for tests. A YoutubeDL instance is not thread-safe, so
-    every call builds its own (these run in asyncio.to_thread workers)."""
+    """Factory seam for tests. A YoutubeDL instance is not thread-safe: never
+    share one across the asyncio.to_thread workers (see _video_ydl)."""
     return yt_dlp.YoutubeDL(opts)
+
+
+# One reusable YoutubeDL per worker thread for single-video extractions. Its
+# extractor keeps the parsed player JS and solved challenges in memory, which
+# a fresh instance would download and solve again (#18: ~20% of a cold
+# lookup). Thread-local, so no instance is ever used by two threads at once.
+# Flat listings (search/channel/playlist) never load the player, so they keep
+# building a fresh instance per call with their own per-call options.
+_tls = threading.local()
+
+
+def _video_ydl() -> Any:
+    # Rebuilt when _make_ydl changes, so a test's monkeypatched seam is never
+    # bypassed by an instance an earlier test left on this thread.
+    if getattr(_tls, "factory", None) is not _make_ydl:
+        _tls.ydl = _make_ydl(dict(_BASE_OPTS))
+        _tls.factory = _make_ydl
+    return _tls.ydl
 
 
 def _map_error(e: BaseException) -> YouTubeError:
@@ -195,8 +232,13 @@ def _map_error(e: BaseException) -> YouTubeError:
 
 def _extract(url: str, extra: dict[str, Any]) -> dict[str, Any]:
     try:
-        with _make_ydl({**_BASE_OPTS, **extra}) as ydl:
-            info = ydl.extract_info(url, download=False)
+        if extra:
+            with _make_ydl({**_BASE_OPTS, **extra}) as ydl:
+                info = ydl.extract_info(url, download=False)
+        else:
+            # Not closed after the call: closing would also drop its
+            # connection pool, and the instance lives on for the next video.
+            info = _video_ydl().extract_info(url, download=False)
     except YouTubeError:
         raise
     except Exception as e:  # DownloadError/ExtractorError and anything else
@@ -350,8 +392,30 @@ async def channel(channel_id: str) -> ChannelInfo:
     return await asyncio.to_thread(_fetch_channel, channel_id)
 
 
-async def playlist(playlist_id: str) -> PlaylistInfo:
-    return await asyncio.to_thread(_fetch_playlist, playlist_id)
+async def playlist(
+    playlist_id: str, *, start: int = 1, limit: int = _PLAYLIST_DEFAULT_LIMIT
+) -> PlaylistInfo:
+    cache_key = (playlist_id, start, limit)
+    cached = _playlist_cache.get(cache_key)
+    if cached and cached[1] > time.time():
+        return cached[0].model_copy(deep=True)
+    # Single-flight, same shape and rationale as search(): concurrent identical
+    # requests (two tabs, a retry after a slow response) collapse onto one
+    # yt-dlp extraction instead of stampeding.
+    task = _inflight_playlist.get(cache_key)
+    if task is None:
+        task = asyncio.create_task(
+            asyncio.to_thread(_fetch_playlist_cached, playlist_id, start, limit, cache_key)
+        )
+        _inflight_playlist[cache_key] = task
+        task.add_done_callback(_release_inflight_playlist)
+    # shield: see video() — one caller's cancellation must not cancel the fetch
+    # that other callers are waiting on.
+    return (await asyncio.shield(task)).model_copy(deep=True)
+
+
+def _release_inflight_playlist(task: asyncio.Task[PlaylistInfo]) -> None:
+    _release_inflight(_inflight_playlist, task)
 
 
 async def resolve_upstream_url(video_id: str, itag: int) -> str:
@@ -594,12 +658,13 @@ def _evict_expired(now: float | None = None) -> None:
     """Drop expired entries from all adapter caches.
 
     Without this the caches grow unbounded over a long-running process.
-    Called off the request hot path, from all three cache-write sites: after a
+    Called off the request hot path, from all four cache-write sites: after a
     stream-URL refresh (_refresh_cache), after a metadata fetch
-    (_fetch_video_cached), and after a search-cache write
-    (_store_search_hits). Each of those is already a cache MISS, so the
-    sweep never runs on a hit. All three are needed: a session that only
-    searches, or only reads metadata, reaches just one of them.
+    (_fetch_video_cached), after a search-cache write (_store_search_hits),
+    and after a playlist-cache write (_fetch_playlist_cached). Each of those
+    is already a cache MISS, so the sweep never runs on a hit. All four are
+    needed: a session that only searches, only reads metadata, or only browses
+    playlists reaches just one of them.
 
     Keys are snapshotted first: writers run in asyncio.to_thread workers, so a
     concurrent writer could otherwise mutate a dict mid-iteration.
@@ -613,6 +678,7 @@ def _evict_expired(now: float | None = None) -> None:
         _stream_url_cache,
         _video_details_cache,
         _search_cache,
+        _playlist_cache,
     )
     for cache in caches:
         for key in list(cache.keys()):
@@ -703,10 +769,22 @@ def _is_unavailable_entry(entry: dict[str, Any]) -> bool:
     return str(entry.get("title") or "") in ("[Private video]", "[Deleted video]")
 
 
-def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
-    info = _extract(f"https://www.youtube.com/playlist?list={playlist_id}", _FLAT_OPTS)
+def _fetch_playlist(
+    playlist_id: str, *, start: int = 1, limit: int = _PLAYLIST_DEFAULT_LIMIT
+) -> PlaylistInfo:
+    """Thread-bound. `start` is 1-based (yt-dlp's playliststart convention);
+    fetches at most `limit` entries beginning there via playliststart/playlistend.
+    """
+    end = start + limit - 1
+    info = _extract(
+        f"https://www.youtube.com/playlist?list={playlist_id}",
+        {**_FLAT_OPTS, "playliststart": start, "playlistend": end},
+    )
+    # Every row, malformed or not, occupies a playlist position: the cursor
+    # math below counts all of them, the loop only maps well-formed dicts.
+    raw_entries = list(info.get("entries") or [])
     items: list[PlaylistItem] = []
-    for entry in info.get("entries") or []:
+    for entry in raw_entries:
         if not isinstance(entry, dict):
             continue
         vid = entry.get("id")
@@ -721,13 +799,39 @@ def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
             duration_seconds=_int(entry.get("duration")),
             thumbnail_url=_best_thumb(entry.get("thumbnails"), max_width=_ROW_THUMB_MAX_W) or "",
         ))
+    video_count = _int(info.get("playlist_count"))
+    # Truncation signal: the window [start, start+limit) may not have reached
+    # the end. Counted in raw rows (unavailable placeholders included) because
+    # playlist_count counts them too. A full window always counts as
+    # truncated, even when playlist_count says otherwise: YouTube can
+    # under-report it, and a spare empty page beats unreachable items.
+    fetched_through = (start - 1) + len(raw_entries)
+    truncated = len(raw_entries) >= limit or (
+        video_count is not None and video_count > fetched_through
+    )
     return PlaylistInfo(
         playlist_id=playlist_id,
         title=str(info.get("title") or "") or f"Playlist {playlist_id}",
         author=_author(info),
-        video_count=_int(info.get("playlist_count")) or len(items),
+        video_count=video_count if video_count is not None else fetched_through,
         items=items,
+        truncated=truncated,
+        next_start=fetched_through + 1 if truncated else None,
     )
+
+
+def _fetch_playlist_cached(
+    playlist_id: str, start: int, limit: int, cache_key: tuple[str, int, int]
+) -> PlaylistInfo:
+    """_fetch_playlist plus the playlist-cache write. Runs in a to_thread
+    worker (yt-dlp extraction touches network + deno)."""
+    info = _fetch_playlist(playlist_id, start=start, limit=limit)
+    ttl = min(float(get_settings().playlist_cache_ttl_seconds), _CACHE_MAX_TTL)
+    _playlist_cache[cache_key] = (info.model_copy(deep=True), time.time() + ttl)
+    # Sweep here too: a playlist-only session (repeated /api/playlist with no
+    # search or video playback) reaches neither of the other two sweep sites.
+    _evict_expired()
+    return info
 
 
 def _live_flag(status: Any) -> bool | None:

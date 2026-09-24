@@ -5,7 +5,6 @@ import Video from '../../src/pages/Video.svelte';
 import Playlist from '../../src/pages/Playlist.svelte';
 import Queue from '../../src/pages/Queue.svelte';
 import Radio from '../../src/pages/Radio.svelte';
-import Settings from '../../src/pages/Settings.svelte';
 
 // Drive the real router singleton: set location.hash and fire the hashchange
 // event it listens for, then assert the derived match. This exercises the
@@ -33,8 +32,25 @@ describe('router matchPath', () => {
     expect(router.match.component).toBe(Queue);
     go('/radio');
     expect(router.match.component).toBe(Radio);
+  });
+
+  it('a "/settings" deep link opens the dialog over "/" instead of routing there', () => {
+    router.closeSettings();
     go('/settings');
-    expect(router.match.component).toBe(Settings);
+    expect(router.path).toBe('/');
+    expect(router.match.component).toBe(Search);
+    expect(router.settingsOpen).toBe(true);
+    router.closeSettings();
+  });
+
+  it('the deep-link redirect replaces the history entry instead of pushing one', () => {
+    router.closeSettings();
+    const len = history.length;
+    go('/settings');
+    expect(window.location.hash).toBe('#/');
+    // go() itself pushes #/settings; the redirect must not add a second entry.
+    expect(history.length).toBe(len + 1);
+    router.closeSettings();
   });
 
   it('captures the /video/:id param', () => {

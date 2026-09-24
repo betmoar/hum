@@ -65,12 +65,16 @@ def test_cors_origins_list_single_origin() -> None:
 def test_cache_ttl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VIDEO_CACHE_TTL_SECONDS", raising=False)
     monkeypatch.delenv("SEARCH_CACHE_TTL_SECONDS", raising=False)
+    monkeypatch.delenv("PLAYLIST_CACHE_TTL_SECONDS", raising=False)
     s = Settings(api_bearer_token="x" * 16, stream_signing_key="00" * 32)
     assert s.video_cache_ttl_seconds == 3600
     assert s.search_cache_ttl_seconds == 300
+    assert s.playlist_cache_ttl_seconds == 300
 
 
-@pytest.mark.parametrize("field", ["video_cache_ttl_seconds", "search_cache_ttl_seconds"])
+@pytest.mark.parametrize(
+    "field", ["video_cache_ttl_seconds", "search_cache_ttl_seconds", "playlist_cache_ttl_seconds"]
+)
 @pytest.mark.parametrize("bad", [0, 3601])
 def test_cache_ttl_rejects_out_of_range(field: str, bad: int) -> None:
     with pytest.raises(ValidationError):

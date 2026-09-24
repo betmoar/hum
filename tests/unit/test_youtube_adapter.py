@@ -586,6 +586,121 @@ async def test_playlist_falls_back_to_placeholder_title(monkeypatch: pytest.Monk
     assert info.items == []
 
 
+async def test_playlist_passes_start_and_limit_as_playliststart_playlistend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, PLAYLIST_INFO)
+    await youtube.playlist("PLxyz", start=11, limit=50)
+    opts, url = FakeYDL.calls[0]
+    assert opts["playliststart"] == 11
+    assert opts["playlistend"] == 60  # start + limit - 1
+    assert "list=PLxyz" in url
+
+
+async def test_playlist_default_start_and_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, PLAYLIST_INFO)
+    await youtube.playlist("PLxyz")
+    opts, _ = FakeYDL.calls[0]
+    assert opts["playliststart"] == 1
+    assert opts["playlistend"] == youtube._PLAYLIST_DEFAULT_LIMIT
+
+
+async def test_playlist_truncated_when_video_count_exceeds_fetch_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info = {**PLAYLIST_INFO, "playlist_count": 100}
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=2)
+    assert result.truncated is True
+
+
+async def test_playlist_not_truncated_when_window_covers_playlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # PLAYLIST_INFO has playlist_count=2 and 2 dict entries; a window big
+    # enough to cover both leaves nothing left to fetch.
+    _install(monkeypatch, PLAYLIST_INFO)
+    result = await youtube.playlist("PLxyz", start=1, limit=200)
+    assert result.truncated is False
+
+
+async def test_playlist_next_start_counts_raw_positions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """next_start advances past filtered (private/deleted) rows, so the next
+    window never overlaps the one just returned."""
+    info = {
+        "title": "Gappy", "uploader": "C", "playlist_count": 10,
+        "entries": [
+            {"id": "v1", "title": "One"},
+            {"id": "v2", "title": "[Private video]"},
+            {"id": "v3", "title": "[Deleted video]"},
+            {"id": "v4", "title": "Four"},
+        ],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert [i.video_id for i in result.items] == ["v1", "v4"]
+    assert result.truncated is True
+    assert result.next_start == 5
+
+
+async def test_playlist_next_start_counts_malformed_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A None / non-dict placeholder still occupies a playlist position."""
+    info = {
+        "title": "Broken", "uploader": "C", "playlist_count": 10,
+        "entries": [{"id": "v1", "title": "One"}, None, "junk", {"id": "v4", "title": "Four"}],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert [i.video_id for i in result.items] == ["v1", "v4"]
+    assert result.next_start == 5
+
+
+async def test_playlist_full_window_is_truncated_despite_low_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YouTube can under-report playlist_count: a full window must still
+    offer the next page, or the remaining items are unreachable."""
+    info = {
+        "title": "Under", "uploader": "C", "playlist_count": 2,
+        "entries": [{"id": f"v{n}", "title": str(n)} for n in range(4)],
+    }
+    _install(monkeypatch, info)
+    result = await youtube.playlist("PLxyz", start=1, limit=4)
+    assert result.truncated is True
+    assert result.next_start == 5
+
+
+async def test_playlist_next_start_none_at_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, PLAYLIST_INFO)
+    result = await youtube.playlist("PLxyz", start=1, limit=200)
+    assert result.next_start is None
+
+
+async def test_playlist_truncation_fallback_without_playlist_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When yt-dlp doesn't report playlist_count, a fetch window that comes
+    back exactly full is treated as (possibly) truncated."""
+    info = {
+        "title": "No Count",
+        "uploader": "C",
+        "entries": [
+            {"id": "v1", "title": "One"},
+            {"id": "v2", "title": "Two"},
+        ],
+    }
+    _install(monkeypatch, info)
+    full = await youtube.playlist("PLnocnt", start=1, limit=2)
+    assert full.truncated is True  # window came back exactly full
+    FakeYDL.calls = []
+    short = await youtube.playlist("PLnocnt", start=1, limit=5)
+    assert short.truncated is False  # window came back short of its limit
+
+
 # ---- search() through the adapter (cache + single-flight + sp) --------------
 
 
