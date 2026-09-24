@@ -78,3 +78,25 @@ def test_listings_get_a_fresh_instance_with_their_opts(recording: type[_Recordin
     adapter._extract("https://www.youtube.com/playlist?list=y", adapter._FLAT_OPTS)
     assert len(recording.created) == 3
     assert [y.opts.get("extract_flat") for y in recording.created] == [None, "in_playlist", "in_playlist"]
+
+
+def test_a_failed_extraction_does_not_poison_the_reused_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    class _Flaky(_RecordingYDL):
+        def extract_info(self, url: str, download: bool = False) -> dict[str, Any]:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Sign in to confirm you're not a bot")
+            return {"id": url}
+
+    _RecordingYDL.created = []
+    monkeypatch.setattr(adapter, "_make_ydl", lambda opts: _Flaky(opts))
+    with pytest.raises(adapter.YouTubeError) as ei:
+        adapter._extract("https://www.youtube.com/watch?v=a", {})
+    assert ei.value.status == 503
+    assert adapter._extract("https://www.youtube.com/watch?v=b", {}) == {
+        "id": "https://www.youtube.com/watch?v=b"}
+    assert len(_RecordingYDL.created) == 1

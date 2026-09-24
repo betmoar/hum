@@ -38,3 +38,13 @@ def test_playlist_returns_info(app_client: TestClient, bearer_token: str) -> Non
     body = r.json()
     assert body["playlist_id"] == "PLabc"
     assert len(body["items"]) == 1
+
+
+@pytest.mark.parametrize("query", ["start=0", "limit=0", "limit=201"])
+def test_playlist_rejects_out_of_range_window(
+    app_client: TestClient, bearer_token: str, query: str,
+) -> None:
+    r = app_client.get(
+        f"/api/playlist/PLabc?{query}", headers={"Authorization": f"Bearer {bearer_token}"}
+    )
+    assert r.status_code == 422

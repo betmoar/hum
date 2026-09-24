@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError } from '../lib/api';
+  import { api, ApiError, isUnreachable } from '../lib/api';
   import { store } from '../lib/store.svelte';
   import Spinner from '../components/Spinner.svelte';
   import Icon from '../components/Icon.svelte';
@@ -53,7 +53,8 @@
         items: [...playlist.items, ...next.items],
       };
     } catch (e) {
-      store.notify(
+      if (isUnreachable(e)) store.notifyUnreachable(() => void loadMore());
+      else store.notify(
         e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Could not load more.',
         'error',
       );
@@ -108,9 +109,12 @@
   function enqueueAll() {
     if (!playlist || playlist.items.length === 0) return;
     store.enqueueStubs(playlist.items.map(stub));
-    const suffix = playlist.truncated
-      ? ` of ${playlist.video_count} (load more to add the rest).`
-      : '.';
+    // The total only when it's believable: video_count can be under-reported.
+    const suffix = !playlist.truncated
+      ? '.'
+      : remaining > 0
+        ? ` of ${playlist.video_count} (load more to add the rest).`
+        : ' (load more to add the rest).';
     store.notify(`Added ${playlist.items.length} tracks to queue${suffix}`, 'info');
   }
 </script>

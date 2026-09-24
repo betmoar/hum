@@ -459,6 +459,43 @@ describe('Player — resume, previous, media session, unreachable', () => {
     expect(JSON.parse(localStorage.getItem('hum.bookmarks')!).long.pos).toBe(300);
   });
 
+  it('pagehide (tab close) saves the position and bookmark', async () => {
+    store.playNow({ ...sampleTrack('ph', '/proxy/audio/ph?x'), durationSeconds: 1200 });
+    const { container } = render(Player);
+    await tick();
+    const audio = container.querySelector('audio') as HTMLAudioElement;
+    Object.defineProperty(audio, 'currentTime', { value: 400, writable: true });
+    Object.defineProperty(audio, 'duration', { value: 1200, configurable: true });
+    audio.dispatchEvent(new Event('loadedmetadata'));
+    window.dispatchEvent(new Event('pagehide'));
+    expect(store.player.positionSeconds).toBe(400);
+    expect(JSON.parse(localStorage.getItem('hum.bookmarks')!).ph.pos).toBe(400);
+  });
+
+  it('timeupdate saves at most once per POSITION_SAVE_INTERVAL_MS', async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      store.playNow(sampleTrack('tu', '/proxy/audio/tu?x'));
+      const { container } = render(Player);
+      await tick();
+      const audio = container.querySelector('audio') as HTMLAudioElement;
+      let t = 10;
+      Object.defineProperty(audio, 'currentTime', { get: () => t, configurable: true });
+      audio.dispatchEvent(new Event('loadedmetadata'));
+      audio.dispatchEvent(new Event('timeupdate'));
+      expect(store.player.positionSeconds).toBe(10);
+      t = 12; now += 1000;
+      audio.dispatchEvent(new Event('timeupdate'));
+      expect(store.player.positionSeconds).toBe(10);
+      t = 16; now += 4000;
+      audio.dispatchEvent(new Event('timeupdate'));
+      expect(store.player.positionSeconds).toBe(16);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('pause before the new source loads does not save (track-switch guard)', async () => {
     store.playNow(sampleTrack('g', '/proxy/audio/g?x'));
     const { container } = render(Player);
@@ -551,6 +588,16 @@ describe('Player — resume, previous, media session, unreachable', () => {
     } finally {
       delete (navigator as any).mediaSession;
     }
+  });
+
+  it('restored live track: unreachable refetch shows the Hum toast, not the live error', async () => {
+    vi.spyOn(api, 'video').mockRejectedValue(new ApiError(0, 'down'));
+    store.player.current = {
+      videoId: 'lr', title: 'L', author: 'a', durationSeconds: 0,
+      thumbnailUrl: '', audioUrl: '', itag: 0, isLive: true,
+    };
+    render(Player);
+    await vi.waitFor(() => expect(store.toast?.message).toBe("Can't reach Hum server."));
   });
 
   it('unreachable server: shows Hum toast and does not refetch', async () => {

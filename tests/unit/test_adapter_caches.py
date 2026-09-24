@@ -430,6 +430,29 @@ async def test_concurrent_playlist_fetches_single_flight(monkeypatch: pytest.Mon
     assert adapter._inflight_playlist == {}
 
 
+async def test_failed_playlist_fetch_is_not_cached_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same contract as test_failed_video_fetch_is_not_cached_and_retries."""
+    calls = {"n": 0}
+
+    def respond(url: str) -> dict[str, Any]:
+        if calls["n"] == 1:
+            raise DownloadError("ERROR: [youtube:tab] PLtest: HTTP Error 500")
+        return _default_respond(url)
+
+    factory, calls = _ydl_factory(respond, calls=calls)
+    monkeypatch.setattr(adapter, "_make_ydl", factory)
+    with pytest.raises(adapter.YouTubeError) as exc:
+        await adapter.playlist("PLtest")
+    assert exc.value.status == 502
+    assert adapter._playlist_cache == {}
+    assert adapter._inflight_playlist == {}
+    info = await adapter.playlist("PLtest")  # retry succeeds
+    assert info.title == "P"
+    assert calls["n"] == 2
+
+
 async def test_playlist_joiner_survives_creator_cancellation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

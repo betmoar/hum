@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 VideoID = Annotated[str, Field(min_length=11, max_length=11, pattern=r"^[A-Za-z0-9_-]{11}$")]
 
@@ -100,3 +100,10 @@ class PlaylistInfo(BaseModel):
     # playlist positions, so it stays right when unavailable entries were
     # filtered out of `items` (len(items) would under-count and overlap).
     next_start: int | None = None
+
+    @model_validator(mode="after")
+    def _cursor_matches_truncation(self) -> PlaylistInfo:
+        # The frontend pages with next_start exactly when truncated.
+        if self.truncated != (self.next_start is not None):
+            raise ValueError("next_start must be set exactly when truncated")
+        return self

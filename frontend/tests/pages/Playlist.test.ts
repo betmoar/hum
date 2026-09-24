@@ -213,6 +213,19 @@ describe('Playlist page — truncation + Load more (#19)', () => {
     expect(queryByText(/load more/i)).toBeNull();
   });
 
+  it('a failed Load more notifies and re-enables the button', async () => {
+    const storeMod = await import('../../src/lib/store.svelte');
+    const notify = vi.spyOn(storeMod.store, 'notify').mockImplementation(() => {});
+    const playlistSpy = vi.spyOn(api, 'playlist').mockResolvedValueOnce(truncatedPlaylist);
+    const { findByText, getByText } = render(Playlist, { props: { id: 'PLbig' } });
+    await findByText('Track B');
+    playlistSpy.mockRejectedValueOnce(new ApiError(502, 'UPSTREAM_FAILURE'));
+    await fireEvent.click(getByText(/load more/i));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith(expect.any(String), 'error'));
+    const btn = await findByText(/load more \(/i);
+    expect((btn.closest('button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('Load more uses the backend next_start cursor, not items.length', async () => {
     // Two unavailable entries were filtered out of the first 4-position window:
     // items.length + 1 would be 3 and re-fetch positions 3-4.
