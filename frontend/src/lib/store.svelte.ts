@@ -3,6 +3,8 @@ import { migrateLegacyKeys } from './migrateLegacy';
 import { api } from './api';
 import { detectAudioEnv } from './browserEnv';
 import { pickForTier } from './pickAudio';
+import { getBookmark, BOOKMARK_MIN_DURATION_S } from './bookmarks';
+import { isBookmarkable, isSeekable } from './contentKind';
 
 // Rename legacy `streamtube.*` keys to `hum.*` before any reads. Idempotent.
 migrateLegacyKeys();
@@ -17,6 +19,7 @@ export type PlayerControls = {
   showPlaybackTargetPicker?: () => void;
   getPosition?: () => number;
   restoreAt?: (pos: number) => void;
+  seekTo?: (seconds: number) => void;
 };
 
 // Module-level non-reactive ref — NOT $state. Components write .current on
@@ -33,6 +36,8 @@ type Settings = {
 type PlayerState = {
   current: Track | null;
   isPlaying: boolean;
+  // Last known playback position of `current`, written by Player every few
+  // seconds and on pause. Persisted with current so a reload resumes there.
   positionSeconds: number;
   shuffle: boolean;
   repeat: 'off' | 'one' | 'all';
@@ -54,6 +59,12 @@ const KEY_BEARER = 'hum.bearer';
 const KEY_QUEUE = 'hum.queue';
 const KEY_DEFAULT_QUALITY = 'hum.defaultQuality';
 const KEY_MUSIC_ONLY = 'hum.musicOnly';
+const KEY_CURRENT = 'hum.current';
+const KEY_HISTORY = 'hum.history';
+export const HISTORY_MAX = 50;
+// "Previous" restarts the current track once it has played this long;
+// before that it goes back to the prior track (common player convention).
+export const PREVIOUS_RESTART_THRESHOLD_S = 3;
 const PERSIST_DEBOUNCE_MS = 200;
 
 function loadString(key: string): string | null {
@@ -70,23 +81,62 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
+// The ONE place signed URLs are stripped before persistence and after
+// rehydrate. audioUrl/hlsUrl/liveStreamUrl all expire; _formats carries more
+// of them. A new signed-URL field on Track is stripped here and nowhere else.
+export function stripSignedUrls(t: Track): Track {
+  const { _formats, ...rest } = t;
+  void _formats;
+  return { ...rest, audioUrl: '', hlsUrl: undefined, liveStreamUrl: undefined };
+}
+
+type PersistedCurrent = { track: Track; pos: number };
+
+function loadCurrent(): PersistedCurrent | null {
+  const v = loadJson<Partial<PersistedCurrent> | null>(KEY_CURRENT, null);
+  if (!v || !v.track || typeof v.track !== 'object' || typeof v.track.videoId !== 'string') return null;
+  const pos = typeof v.pos === 'number' && Number.isFinite(v.pos) && v.pos > 0 ? v.pos : 0;
+  return { track: stripSignedUrls(v.track), pos };
+}
+
+function loadTrackList(key: string): Track[] {
+  const v = loadJson<unknown>(key, []);
+  if (!Array.isArray(v)) return [];
+  return (v as Track[]).filter((t) => t && typeof t.videoId === 'string').map(stripSignedUrls);
+}
+
+const restored = loadCurrent();
+
 class AppStore {
   settings = $state<Settings>({
     bearerToken: loadString(KEY_BEARER),
     defaultQuality: (loadString(KEY_DEFAULT_QUALITY) as Quality | null) === 'low' ? 'low' : 'hi',
     musicOnly: loadString(KEY_MUSIC_ONLY) === 'false' ? false : true,
   });
-  queue = $state<Track[]>(
-    // Stored audioUrl/hlsUrl are signed with a TTL; on rehydrate they're almost
-    // certainly stale. Clear BOTH so the Player refetches via api.video on next
-    // play — a surviving hlsUrl makes pickVodSrc() return a dead URL on Safari
-    // and skips the rehydrate refetch entirely.
-    loadJson<Track[]>(KEY_QUEUE, []).map((t) => ({ ...t, audioUrl: '', hlsUrl: undefined }))
-  );
-  player = $state<PlayerState>({ current: null, isPlaying: false, positionSeconds: 0, shuffle: false, repeat: 'off', isExpanded: false, airplayCapable: false });
+  // Stored audioUrl/hlsUrl are signed with a TTL; on rehydrate they're almost
+  // certainly stale. stripSignedUrls clears them so the Player refetches via
+  // api.video on next play — a surviving hlsUrl makes pickVodSrc() return a
+  // dead URL on Safari and skips the rehydrate refetch entirely.
+  queue = $state<Track[]>(loadTrackList(KEY_QUEUE));
+  // Played tracks, most recent last. Backs previous(); capped at HISTORY_MAX.
+  history = $state<Track[]>(loadTrackList(KEY_HISTORY));
+  // A restored track comes back PAUSED (isPlaying false) at its saved
+  // position — a page reload must never start audio on its own.
+  player = $state<PlayerState>({
+    current: restored?.track ?? null,
+    isPlaying: false,
+    positionSeconds: restored?.pos ?? 0,
+    shuffle: false,
+    repeat: 'off',
+    isExpanded: false,
+    airplayCapable: false,
+  });
   toast = $state<Toast | null>(null);
 
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // videoId of the track restored from storage; startPositionFor() hands out
+  // its saved position exactly once.
+  #restoredId: string | null = restored?.track.videoId ?? null;
   #toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
@@ -95,6 +145,9 @@ class AppStore {
       $effect(() => {
         // Touch the reactive deps so this effect re-runs on change.
         void this.queue.length;
+        void this.history.length;
+        void this.player.current;
+        void this.player.positionSeconds;
         void this.settings.bearerToken;
         void this.settings.defaultQuality;
         void this.settings.musicOnly;
@@ -113,14 +166,17 @@ class AppStore {
       }
       localStorage.setItem(KEY_DEFAULT_QUALITY, this.settings.defaultQuality);
       localStorage.setItem(KEY_MUSIC_ONLY, String(this.settings.musicOnly));
-      const queueToPersist = this.queue.map((t) => {
-        const { _formats, ...rest } = t;
-        // Signed URLs must not be persisted: audioUrl, hlsUrl, liveStreamUrl
-        // all expire. If you add a new signed-URL field to Track, strip it
-        // here AND in the queue rehydrate map above.
-        return { ...rest, audioUrl: '', hlsUrl: undefined, liveStreamUrl: undefined };
-      });
-      localStorage.setItem(KEY_QUEUE, JSON.stringify(queueToPersist));
+      // Signed URLs must never be persisted — every Track goes through
+      // stripSignedUrls (the single strip point).
+      localStorage.setItem(KEY_QUEUE, JSON.stringify(this.queue.map(stripSignedUrls)));
+      localStorage.setItem(KEY_HISTORY, JSON.stringify(this.history.map(stripSignedUrls)));
+      const cur = this.player.current;
+      if (cur) {
+        const persisted: PersistedCurrent = { track: stripSignedUrls(cur), pos: this.player.positionSeconds };
+        localStorage.setItem(KEY_CURRENT, JSON.stringify(persisted));
+      } else {
+        localStorage.removeItem(KEY_CURRENT);
+      }
     } catch {
       // Storage may be unavailable (private browsing). Best-effort.
     }
@@ -150,7 +206,14 @@ class AppStore {
     this.queue = [{ ...t, queueId: t.queueId ?? crypto.randomUUID() }, ...this.queue];
   }
 
+  #pushHistory(t: Track): void {
+    const next = [...this.history, t];
+    this.history = next.length > HISTORY_MAX ? next.slice(next.length - HISTORY_MAX) : next;
+  }
+
   playNow(t: Track): void {
+    const prev = this.player.current;
+    if (prev && prev.videoId !== t.videoId) this.#pushHistory(prev);
     this.player.current = t;
     this.player.isPlaying = true;
     this.player.positionSeconds = 0;
@@ -195,6 +258,7 @@ class AppStore {
         this.player.current = { ...this.player.current };
         return;
       }
+      if (this.player.current) this.#pushHistory(this.player.current);
       this.player.current = null;
       this.player.isPlaying = false;
       this.player.positionSeconds = 0;
@@ -214,10 +278,54 @@ class AppStore {
       rest.push(this.player.current);
     }
 
+    if (this.player.current) this.#pushHistory(this.player.current);
     this.queue = rest;
     this.player.current = next;
     this.player.isPlaying = true;
     this.player.positionSeconds = 0;
+  }
+
+  /**
+   * Go to the previous track, or restart the current one once it has played
+   * past PREVIOUS_RESTART_THRESHOLD_S (or when there is no history). The
+   * track being left goes back to the FRONT of the queue so "next" returns
+   * to it.
+   */
+  previous(): void {
+    const cur = this.player.current;
+    if (!cur) return;
+    const pos = playerControls.current?.getPosition?.() ?? 0;
+    if (pos > PREVIOUS_RESTART_THRESHOLD_S || this.history.length === 0) {
+      if (isSeekable(cur)) playerControls.current?.seekTo?.(0);
+      return;
+    }
+    const prior = this.history[this.history.length - 1];
+    this.history = this.history.slice(0, -1);
+    this.queue = [cur, ...this.queue];
+    this.player.current = prior;
+    this.player.isPlaying = true;
+    this.player.positionSeconds = 0;
+  }
+
+  /** Record the last known playback position (persisted with current). */
+  setPosition(seconds: number): void {
+    if (Number.isFinite(seconds) && seconds >= 0) this.player.positionSeconds = seconds;
+  }
+
+  /**
+   * Where playback of `t` should start: the saved position for the track
+   * restored on load (once), else a resume bookmark for long VOD, else 0.
+   */
+  startPositionFor(t: Track): number {
+    // One-shot either way: whichever track the player asks about first
+    // settles the restore, so a later replay of that video doesn't jump.
+    const restoredId = this.#restoredId;
+    this.#restoredId = null;
+    if (restoredId !== null && t.videoId === restoredId) {
+      return isSeekable(t) ? this.player.positionSeconds : 0;
+    }
+    if (!isBookmarkable(t) || t.durationSeconds < BOOKMARK_MIN_DURATION_S) return 0;
+    return getBookmark(t.videoId) ?? 0;
   }
 
   /** Restart the current track from the beginning. */

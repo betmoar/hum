@@ -31,6 +31,7 @@ async function freshStore() {
   mod.store.player.shuffle = false;
   mod.store.player.repeat = 'off';
   mod.store.player.isExpanded = false;
+  mod.store.history = [];
   return mod.store;
 }
 
@@ -574,5 +575,172 @@ describe('AppStore — live tracks', () => {
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed[0].liveStreamUrl).toBeUndefined();
+  });
+});
+
+describe('history + previous', () => {
+  it('next pushes outgoing current to history', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.enqueue(t('b'));
+    s.next();
+    expect(s.history.map((x) => x.videoId)).toEqual(['a']);
+  });
+
+  it('next with empty queue and repeat off pushes the stopped track', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.next();
+    expect(s.player.current).toBeNull();
+    expect(s.history.map((x) => x.videoId)).toEqual(['a']);
+  });
+
+  it('repeat one does not push', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.player.repeat = 'one';
+    s.next();
+    expect(s.history).toEqual([]);
+  });
+
+  it('repeat all wrap of a lone track does not push', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.player.repeat = 'all';
+    s.next();
+    expect(s.history).toEqual([]);
+  });
+
+  it('playNow of a different track pushes; same track does not', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.playNow(t('a'));
+    s.playNow(t('b'));
+    expect(s.history.map((x) => x.videoId)).toEqual(['a']);
+  });
+
+  it('history is capped at 50, oldest dropped', async () => {
+    const s = await freshStore();
+    s.playNow(t('x0'));
+    for (let i = 1; i <= 60; i++) s.playNow(t('x' + i));
+    expect(s.history.length).toBe(50);
+    expect(s.history[0].videoId).toBe('x10');
+  });
+
+  it('previous within threshold goes back and requeues current at front', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    mod.playerControls.current = { getPosition: () => 1, seekTo: vi.fn() } as any;
+    s.playNow(t('a'));
+    s.enqueue(t('c'));
+    s.playNow(t('b'));
+    s.previous();
+    expect(s.player.current?.videoId).toBe('a');
+    expect(s.player.isPlaying).toBe(true);
+    expect(s.queue.map((x) => x.videoId)).toEqual(['b', 'c']);
+    expect(s.history).toEqual([]);
+    mod.playerControls.current = null;
+  });
+
+  it('previous past threshold restarts via seekTo(0)', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    mod.playerControls.current = { getPosition: () => 10, seekTo } as any;
+    s.playNow(t('a'));
+    s.playNow(t('b'));
+    s.previous();
+    expect(seekTo).toHaveBeenCalledWith(0);
+    expect(s.player.current?.videoId).toBe('b');
+    mod.playerControls.current = null;
+  });
+
+  it('previous with empty history restarts', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    mod.playerControls.current = { getPosition: () => 0, seekTo } as any;
+    s.playNow(t('a'));
+    s.previous();
+    expect(seekTo).toHaveBeenCalledWith(0);
+    mod.playerControls.current = null;
+  });
+
+  it('previous on a live track with empty history does not seek', async () => {
+    const mod = await import('../../src/lib/store.svelte');
+    const s = await freshStore();
+    const seekTo = vi.fn();
+    mod.playerControls.current = { getPosition: () => 0, seekTo } as any;
+    s.playNow({ ...t('L'), isLive: true });
+    s.previous();
+    expect(seekTo).not.toHaveBeenCalled();
+    mod.playerControls.current = null;
+  });
+});
+
+describe('persisted current + history', () => {
+  it('stripSignedUrls removes every URL field and _formats', async () => {
+    const { stripSignedUrls } = await import('../../src/lib/store.svelte');
+    const out = stripSignedUrls({ ...t('a'), hlsUrl: '/h', liveStreamUrl: '/l', _formats: [] as any });
+    expect(out.audioUrl).toBe('');
+    expect(out.hlsUrl).toBeUndefined();
+    expect(out.liveStreamUrl).toBeUndefined();
+    expect('_formats' in out).toBe(false);
+    expect(out.videoId).toBe('a');
+  });
+
+  it('flush writes current, position and history without URLs', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    s.playNow(t('b'));
+    s.setPosition(42);
+    await new Promise((r) => setTimeout(r, 250));
+    const cur = JSON.parse(localStorage.getItem('hum.current')!);
+    expect(cur.track.videoId).toBe('b');
+    expect(cur.track.audioUrl).toBe('');
+    expect(cur.pos).toBe(42);
+    const hist = JSON.parse(localStorage.getItem('hum.history')!);
+    expect(hist.map((x: any) => x.videoId)).toEqual(['a']);
+    expect(hist[0].audioUrl).toBe('');
+  });
+
+  it('flush removes hum.current when nothing is playing', async () => {
+    const s = await freshStore();
+    s.playNow(t('a'));
+    await new Promise((r) => setTimeout(r, 250));
+    s.next();
+    await new Promise((r) => setTimeout(r, 250));
+    expect(localStorage.getItem('hum.current')).toBeNull();
+  });
+
+  it('rehydrates current paused at saved position; startPositionFor consumes it once', async () => {
+    vi.resetModules();
+    localStorage.setItem('hum.current', JSON.stringify({ track: { ...t('a'), audioUrl: '/stale', hlsUrl: '/h' }, pos: 77 }));
+    localStorage.setItem('hum.history', JSON.stringify([{ ...t('z'), audioUrl: '/stale' }]));
+    const { store: s } = await import('../../src/lib/store.svelte');
+    expect(s.player.current?.videoId).toBe('a');
+    expect(s.player.current?.audioUrl).toBe('');
+    expect(s.player.current?.hlsUrl).toBeUndefined();
+    expect(s.player.isPlaying).toBe(false);
+    expect(s.player.positionSeconds).toBe(77);
+    expect(s.history[0].audioUrl).toBe('');
+    expect(s.startPositionFor(s.player.current!)).toBe(77);
+    expect(s.startPositionFor(s.player.current!)).toBe(0);
+  });
+
+  it('rehydrate tolerates corrupt current', async () => {
+    vi.resetModules();
+    localStorage.setItem('hum.current', '{"track": null, "pos": "x"}');
+    const { store: s } = await import('../../src/lib/store.svelte');
+    expect(s.player.current).toBeNull();
+    expect(s.player.positionSeconds).toBe(0);
+  });
+
+  it('startPositionFor uses a bookmark only for long vod', async () => {
+    const s = await freshStore();
+    localStorage.setItem('hum.bookmarks', JSON.stringify({ L: { pos: 300, at: 1 }, S: { pos: 50, at: 1 } }));
+    expect(s.startPositionFor({ ...t('L'), durationSeconds: 1200 })).toBe(300);
+    expect(s.startPositionFor({ ...t('S'), durationSeconds: 200 })).toBe(0);
+    expect(s.startPositionFor({ ...t('L'), durationSeconds: 1200, isLive: true })).toBe(0);
   });
 });
