@@ -37,7 +37,26 @@ from app.models import AudioFormat, SearchHit, VideoDetails, VideoFormat
 
 logger = logging.getLogger(__name__)
 
+class _YdlLogger:
+    """Route yt-dlp's own output into Hum's logging. Without a logger it
+    prints ERROR lines to stderr even with quiet=True; the actual failure is
+    already surfaced as a mapped YouTubeError, so these are debug detail."""
+
+    def debug(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    def info(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+    def warning(self, msg: str) -> None:
+        logger.warning("yt-dlp: %s", msg)
+
+    def error(self, msg: str) -> None:
+        logger.debug("yt-dlp error (raised as YouTubeError): %s", msg)
+
+
 _BASE_OPTS: dict[str, Any] = {
+    "logger": _YdlLogger(),
     "quiet": True,
     "no_warnings": True,
     "skip_download": True,

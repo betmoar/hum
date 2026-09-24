@@ -142,3 +142,31 @@ Tag `vX.Y.Z` on main → `.github/workflows/release.yml` re-runs the full gate, 
 `frontend/dist`, extracts the CHANGELOG section for that version, publishes a GitHub
 Release. Keep `CHANGELOG.md` in Keep-a-Changelog format — the awk extraction in the
 workflow depends on `## [X.Y.Z]` headings.
+
+## 8. yt-dlp backend spike (branch `spike/ytdlp-backend`)
+
+Spec: `docs/dev/2026-09-24-ytdlp-spike-spec.md`. The yt-dlp backend is opt-in and
+covers `video()` and `search()` only (channel, playlist and the live master manifest
+stay on pytubefix).
+
+1. Install deno (yt-dlp's JavaScript runtime for YouTube): <https://deno.com>. Check
+   with `deno --version`. Without it the app logs one ERROR at startup and yt-dlp
+   extraction degrades or fails.
+2. Try it live: `YT_BACKEND=ytdlp ./scripts/dev.sh`.
+3. Measure, on a machine that can reach YouTube:
+   ```bash
+   uv run python scripts/bench_yt_backends.py --capture
+   uv run pytest -m integration        # every live test runs once per backend
+   uv run pytest tests/unit/test_youtube_ytdlp.py   # now against captured shapes
+   ```
+   - The benchmark writes `docs/dev/ytdlp-spike-report.md` (plus a `.json`). It exits
+     non-zero unless all of D1–D5 pass.
+   - `--capture` writes scrubbed yt-dlp responses to `tests/fixtures/ytdlp/`: signed,
+     IP-bound URLs are replaced by placeholders, so they're safe to commit.
+4. Edit `scripts/bench_yt_set.json` first:
+   - its ids were written without network access;
+   - the age-restricted slot needs a real id;
+   - live ids must be broadcasting.
+   If every row fails on both backends, the report says to check your network and deno.
+5. Decide by the report. The thresholds were fixed in the spec before measuring; don't
+   move them after.

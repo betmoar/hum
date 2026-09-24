@@ -248,3 +248,21 @@ def test_search_without_filter_has_no_sp(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_search_skips_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, {"entries": [None, {"ie_key": "Youtube"}, SEARCH_INFO["entries"][0]]})
     assert [h.id for h in ytdlp.search_hits("q", 10, None)] == ["vid00000001"]
+
+
+def test_yt_dlp_output_goes_to_logging_not_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, VOD_INFO)
+    ytdlp.fetch_video("abc12345678")
+    lg = FakeYDL.calls[0][0]["logger"]
+    for method in ("debug", "info", "warning", "error"):
+        getattr(lg, method)("msg")  # must not raise
+
+
+def test_captured_search_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = FIXTURES / "search_flat.json"
+    if not p.exists():
+        pytest.skip("no captured search fixture yet (run bench --capture)")
+    _install(monkeypatch, json.loads(p.read_text()))
+    hits = ytdlp.search_hits("q", 20, None)
+    videos = [h for h in hits if h.kind == "video"]
+    assert videos and all(h.title for h in videos)
