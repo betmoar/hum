@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import base64
 
-# YouTube's "Music" topic id (same value as youtube._MUSIC_TOPIC_ID).
+# YouTube's "Music" topic id. Hard-coded in YouTube's UI and stable in
+# practice, but not a public contract: if it changes, music search silently
+# degrades to unfiltered.
 MUSIC_TOPIC_ID = "/m/04rlf"
 
 _WIRE_VARINT = 0

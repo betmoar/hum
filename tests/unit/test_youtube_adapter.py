@@ -574,7 +574,8 @@ async def test_playlist_maps_fields_and_skips_bad_entries(monkeypatch: pytest.Mo
     item = info.items[0]
     assert (item.video_id, item.title, item.author, item.duration_seconds) == (
         "vid1", "Item One", "Author", 60)
-    assert item.thumbnail_url == "https://i.ytimg.com/vi/vid1/hq720.jpg"  # widest thumbnail
+    # Widest that fits a row (<= _ROW_THUMB_MAX_W); hq720 would be 1280 px per row.
+    assert item.thumbnail_url == "https://i.ytimg.com/vi/vid1/default.jpg"
 
 
 async def test_playlist_falls_back_to_placeholder_title(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -865,3 +866,104 @@ def test_unfiltered_search_fetches_exactly_limit(monkeypatch: pytest.MonkeyPatch
     _install(monkeypatch, SEARCH_INFO)
     youtube._search_hits("q", 7, None, kinds=None)
     assert FakeYDL.calls[0][0]["playlistend"] == 7
+
+
+# ---- /code-review findings (PR #16) -------------------------------------------
+
+
+def _audio(fid: str, lang: str | None, pref: int, note: str = "") -> dict[str, Any]:
+    itag = fid.split("-")[0]
+    return _fmt(fid, ext="m4a" if itag in ("139", "140") else "webm",
+                acodec="mp4a.40.2" if itag in ("139", "140") else "opus", abr=128,
+                language=lang, language_preference=pref, format_note=note,
+                url=f"https://rr1---sn.googlevideo.com/videoplayback?itag={itag}&xtags=lang%3D{lang}&expire={EXPIRE}")
+
+
+def test_multi_audio_video_keeps_original_language_tracks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dubbed videos: yt-dlp renames duplicate itags to 140-0, 140-1, ... (measured on
+    0e3GPea1Tyg: 120 audio formats, 0 all-digit ids -> audio_formats was empty)."""
+    info = {**VOD_INFO, "formats": [
+        _audio("140-0", "de", -1, "German"),
+        _audio("140-1", "en-US", 10, "English (US) original (default)"),
+        _audio("251-0", "de", -1, "German"),
+        _audio("251-1", "en-US", 10, "English (US) original (default)"),
+    ]}
+    _install(monkeypatch, info)
+    d = youtube._fetch_video("abc12345678")
+    assert sorted(a.itag for a in d.audio_formats) == [140, 251]
+    url = youtube._stream_url_cache[("abc12345678", 140)][0]
+    assert "en-US" in url  # the original track, not the first dub
+
+
+def test_drc_variants_stay_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = {**VOD_INFO, "formats": [_audio("140", "en", 10), _audio("140-drc", "en", 10)]}
+    _install(monkeypatch, info)
+    assert [a.itag for a in youtube._fetch_video("abc12345678").audio_formats] == [140]
+
+
+@pytest.mark.parametrize(
+    ("message", "status", "code"),
+    [
+        # Nothing selectable = SABR/PO-token blocking, not a dead link.
+        ("ERROR: [youtube] x: Requested format is not available. Use --list-formats", 503, "YOUTUBE_BLOCKED"),
+        ("ERROR: [youtube] x: This content isn't available, try again later.", 503, "YOUTUBE_BLOCKED"),
+        ("ERROR: [youtube] x: Join this channel to get access to members-only content", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] x: This live event will begin in 3 hours.", 404, "VIDEO_UNAVAILABLE"),
+        ("ERROR: [youtube] x: Video unavailable. This video is not available", 404, "VIDEO_UNAVAILABLE"),
+    ],
+)
+def test_error_mapping_review_cases(monkeypatch: pytest.MonkeyPatch, message: str, status: int, code: str) -> None:
+    from yt_dlp.utils import DownloadError
+
+    _install(monkeypatch, DownloadError(message))
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("x")
+    assert (ei.value.status, ei.value.code) == (status, code)
+
+
+def test_search_keeps_youtube_music_album_playlists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RDCLAK5uy... are curated/album playlists and open fine (measured); only
+    video Mixes (RD<videoId>, RDMM, RDAMVM...) are unviewable."""
+    entries = [
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "RDCLAK5uy_lf8okgl2ygD075nhnJVjlfhwp8NsUgEbs",
+         "url": "https://www.youtube.com/playlist?list=RDCLAK5uy_lf8okgl2ygD075nhnJVjlfhwp8NsUgEbs", "title": "Album"},
+        {"_type": "url", "ie_key": "YoutubeTab", "id": "RDtNdN4efddQc",
+         "url": "https://www.youtube.com/playlist?list=RDtNdN4efddQc", "title": "Mix - x"},
+    ]
+    _install(monkeypatch, {"entries": entries})
+    assert [h.id for h in youtube._search_hits("q", 10, None)] == ["RDCLAK5uy_lf8okgl2ygD075nhnJVjlfhwp8NsUgEbs"]
+
+
+@pytest.mark.parametrize(("status", "expected"), [("is_live", True), ("was_live", False),
+                                                   ("is_upcoming", False), ("not_live", False), (None, None)])
+def test_search_hit_live_status_is_exact(monkeypatch: pytest.MonkeyPatch, status: str | None, expected: bool | None) -> None:
+    entry = {**SEARCH_INFO["entries"][0], "live_status": status}
+    _install(monkeypatch, {"entries": [entry]})
+    assert youtube._search_hits("q", 5, None)[0].is_live is expected
+
+
+def test_playlist_skips_unavailable_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = [
+        {"id": "vidprivate1", "title": "[Private video]", "availability": "private"},
+        {"id": "viddeleted1", "title": "[Deleted video]"},
+        {"id": "vidgood0001", "title": "Real", "channel": "C", "duration": 10},
+    ]
+    _install(monkeypatch, {"id": "PLx", "title": "T", "entries": entries})
+    assert [i.video_id for i in youtube._fetch_playlist("PLabcdefghijk").items] == ["vidgood0001"]
+
+
+def test_playlist_item_thumbnail_is_modest_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    thumbs = [{"url": "https://i.ytimg.com/vi/v/small.jpg", "width": 168},
+              {"url": "https://i.ytimg.com/vi/v/mid.jpg", "width": 336},
+              {"url": "https://i.ytimg.com/vi/v/hq720.jpg", "width": 1280}]
+    _install(monkeypatch, {"id": "PLx", "title": "T", "entries": [{"id": "vidgood0001", "title": "R", "thumbnails": thumbs}]})
+    assert youtube._fetch_playlist("PLabcdefghijk").items[0].thumbnail_url.endswith("mid.jpg")
+
+
+def test_post_live_is_reported_unavailable_not_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    info = {**VOD_INFO, "live_status": "post_live",
+            "formats": [_fmt("140", protocol="http_dash_segments_generator", acodec="mp4a.40.2", ext="m4a")]}
+    _install(monkeypatch, info)
+    with pytest.raises(YouTubeError) as ei:
+        youtube._fetch_video("abc12345678")
+    assert ei.value.status == 503

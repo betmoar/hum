@@ -301,3 +301,24 @@ def test_log_redaction_covers_exception_tracebacks() -> None:
     out = buf.getvalue()
     assert "Traceback" in out and "<googlevideo-url>" in out
     assert "SECRET" not in out and "203.0.113.9" not in out
+
+
+def test_redaction_filter_never_raises_into_the_caller() -> None:
+    """A malformed log call must stay logging's problem (handleError), not
+    raise TypeError at the call site — a filter runs outside emit()'s try."""
+    from app.main import _RedactCdnUrls
+
+    record = logging.LogRecord("some.lib", logging.WARNING, __file__, 1, "two %s %s", ("one",), None)
+    # Before the fix: getMessage() raised TypeError out of filter() into the
+    # caller. Now the record passes through untouched for emit()/handleError.
+    assert _RedactCdnUrls().filter(record) is True
+    assert record.msg == "two %s %s" and record.args == ("one",)
+
+
+def test_redaction_covers_uvicorn_loggers() -> None:
+    from app.main import _RedactCdnUrls, _configure_logging
+
+    _configure_logging()
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        lg = logging.getLogger(name)
+        assert any(isinstance(f, _RedactCdnUrls) for f in lg.filters), name

@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import yt_dlp
-from yt_dlp.utils import DownloadError, ExtractorError
 
 from app.adapters.search_params import build_search_sp
 from app.config import get_settings
@@ -149,13 +148,18 @@ _FLAT_OPTS: dict[str, Any] = {"extract_flat": "in_playlist", "noplaylist": False
 # Substrings of yt-dlp error messages. yt-dlp errors are strings, not a
 # class hierarchy, so this is the mapping. New wording from YouTube → add a
 # marker here and a row in test_youtube_adapter.py::test_error_mapping.
+# Order matters: blocked is checked first, so "requested format is not
+# available" (SABR / PO-token blocking left nothing selectable) is not
+# mistaken for a dead link by the broad "is not available" marker below.
 _BLOCKED_MARKERS = (
     "sign in to confirm", "po token", "not a bot", "confirm your age", "age-restricted",
+    "requested format is not available", "try again later", "rate-limit", "rate limit",
 )
 _UNAVAILABLE_MARKERS = (
     "video unavailable", "video is unavailable", "private video", "has been removed",
     "is not available", "account associated with this video has been terminated",
-    "does not exist",
+    "does not exist", "members-only", "join this channel", "live event will begin",
+    "premieres in",
 )
 
 _AUDIO_MIME = {"m4a": "audio/mp4", "mp4": "audio/mp4", "webm": "audio/webm"}
@@ -195,9 +199,7 @@ def _extract(url: str, extra: dict[str, Any]) -> dict[str, Any]:
             info = ydl.extract_info(url, download=False)
     except YouTubeError:
         raise
-    except (DownloadError, ExtractorError) as e:
-        raise _map_error(e) from e
-    except Exception as e:
+    except Exception as e:  # DownloadError/ExtractorError and anything else
         # Anything else is yt-dlp breaking or YouTube changing shape: a mapped
         # 502, never a bare 500 (the frontend's recovery keys off statuses).
         raise _map_error(e) from e
@@ -457,25 +459,26 @@ def _fetch_video(video_id: str) -> VideoDetails:
         _cache_live_master(video_id, live.master_hls_url)
         return _live_video_details(video_id, live)
 
+    if info.get("live_status") == "post_live":
+        # A just-ended broadcast still processing: yt-dlp only offers segment
+        # generators, nothing proxyable yet. Retryable, so 503 not 404.
+        raise YouTubeError(503, "LIVE_PROCESSING", f"{video_id} just ended and is still processing")
+
     audio: list[AudioFormat] = []
     video: list[VideoFormat] = []
     seen: set[int] = set()
     now = time.time()
-    for f in info.get("formats") or []:
-        if not isinstance(f, dict):
-            continue
+    for f in _formats_by_preference(info.get("formats") or []):
         # Direct progressive/DASH URLs only; manifests and storyboards are not
-        # proxyable byte streams. Non-numeric ids ("140-drc", "sb0") are
-        # variants we don't expose.
+        # proxyable byte streams.
         if f.get("protocol") not in ("https", "http"):
             continue
-        fid = str(f.get("format_id") or "")
+        itag = _itag_of(str(f.get("format_id") or ""))
         url = f.get("url")
-        if not fid.isdigit() or not isinstance(url, str) or not url:
+        if itag is None or not isinstance(url, str) or not url:
             continue
-        itag = int(fid)
         if itag in seen:
-            continue  # first occurrence wins (yt-dlp may list one itag per client)
+            continue  # best-ranked occurrence wins (see _formats_by_preference)
         seen.add(itag)
         vcodec = str(f.get("vcodec") or "none")
         acodec = str(f.get("acodec") or "none")
@@ -515,6 +518,23 @@ def _fetch_video(video_id: str) -> VideoDetails:
         video_formats=video,
     )
 
+
+
+def _itag_of(format_id: str) -> int | None:
+    """yt-dlp format_id -> itag. Plain ids are itags ("140"); multi-audio
+    videos get "140-0", "140-1", ... per language track. Other suffixes
+    ("140-drc", "sb0") are variants we don't expose."""
+    base, _, suffix = format_id.partition("-")
+    if not base.isdigit() or (suffix and not suffix.isdigit()):
+        return None
+    return int(base)
+
+
+def _formats_by_preference(formats: list[Any]) -> list[dict[str, Any]]:
+    """Dict formats, best language track first: the original/default track
+    (highest language_preference) wins when one itag exists per language."""
+    fs = [f for f in formats if isinstance(f, dict)]
+    return sorted(fs, key=lambda f: -(_int(f.get("language_preference")) or 0))
 
 
 def _fetch_video_cached(video_id: str) -> VideoDetails:
@@ -577,7 +597,7 @@ def _evict_expired(now: float | None = None) -> None:
     Called off the request hot path, from all three cache-write sites: after a
     stream-URL refresh (_refresh_cache), after a metadata fetch
     (_fetch_video_cached), and after a search-cache write
-    (_collect_and_cache_search). Each of those is already a cache MISS, so the
+    (_store_search_hits). Each of those is already a cache MISS, so the
     sweep never runs on a hit. All three are needed: a session that only
     searches, or only reads metadata, reaches just one of them.
 
@@ -622,8 +642,9 @@ def _live_video_details(video_id: str, info: LiveStreamInfo) -> VideoDetails:
 
 
 def _store_search_hits(hits: list[SearchHit], cache_key: tuple[str, str | None, bool, int]) -> None:
-    """Search-cache write + eviction sweep. Runs in the to_thread worker: the
-    sweep runs HERE because a search-only session never reaches _refresh_cache."""
+    """Search-cache write + eviction sweep. Runs on the event loop after the
+    extraction returns (cheap: dict ops only). The sweep runs HERE because a
+    search-only session never reaches _refresh_cache."""
     # Clamped like the video-metadata TTL: an operator-set value is defence in
     # depth away from serving hours-stale search results.
     ttl = min(float(get_settings().search_cache_ttl_seconds), _CACHE_MAX_TTL)
@@ -631,19 +652,27 @@ def _store_search_hits(hits: list[SearchHit], cache_key: tuple[str, str | None, 
     _evict_expired()
 
 
-def _best_thumb(thumbs: Any, *, prefer_id: str | None = None) -> str | None:
+def _best_thumb(
+    thumbs: Any, *, prefer_id: str | None = None, max_width: int | None = None
+) -> str | None:
     """Pick a thumbnail URL from a yt-dlp `thumbnails` list: the entry with id
-    `prefer_id` if present, else the widest, else the last."""
+    `prefer_id` if present, else the widest (no wider than `max_width` when
+    any fits), else the last listed."""
     if not isinstance(thumbs, list):
         return None
     good = [t for t in thumbs if isinstance(t, dict) and isinstance(t.get("url"), str) and t["url"]]
     if not good:
         return None
+    best: dict[str, Any] | None = None
     if prefer_id is not None:
-        for t in good:
-            if t.get("id") == prefer_id:
-                return str(t["url"])
-    best = max(good, key=lambda t: _int(t.get("width")) or 0)
+        best = next((t for t in good if t.get("id") == prefer_id), None)
+    if best is None:
+        pool = good
+        if max_width is not None:
+            fitting = [t for t in good if 0 < (_int(t.get("width")) or 0) <= max_width]
+            pool = fitting or good
+        widths = [_int(t.get("width")) or 0 for t in pool]
+        best = pool[widths.index(max(widths))] if any(widths) else pool[-1]
     url = str(best["url"])
     return "https:" + url if url.startswith("//") else url
 
@@ -661,6 +690,19 @@ def _fetch_channel(channel_id: str) -> ChannelInfo:
     )
 
 
+# Playlist rows render ~112 px wide; 2x for HiDPI. hq720 (1280 px) per row
+# would be megabytes for a long playlist.
+_ROW_THUMB_MAX_W = 360
+
+
+def _is_unavailable_entry(entry: dict[str, Any]) -> bool:
+    """Private/deleted placeholders still carry ids in flat playlist listings;
+    queueing them stalls playback on a 404."""
+    if entry.get("availability") in ("private", "needs_auth", "subscriber_only", "premium_only"):
+        return True
+    return str(entry.get("title") or "") in ("[Private video]", "[Deleted video]")
+
+
 def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
     info = _extract(f"https://www.youtube.com/playlist?list={playlist_id}", _FLAT_OPTS)
     items: list[PlaylistItem] = []
@@ -670,12 +712,14 @@ def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
         vid = entry.get("id")
         if not isinstance(vid, str) or not vid:
             continue
+        if _is_unavailable_entry(entry):
+            continue
         items.append(PlaylistItem(
             video_id=vid,
             title=str(entry.get("title") or ""),
             author=_author(entry),
             duration_seconds=_int(entry.get("duration")),
-            thumbnail_url=_best_thumb(entry.get("thumbnails")) or "",
+            thumbnail_url=_best_thumb(entry.get("thumbnails"), max_width=_ROW_THUMB_MAX_W) or "",
         ))
     return PlaylistInfo(
         playlist_id=playlist_id,
@@ -686,13 +730,13 @@ def _fetch_playlist(playlist_id: str) -> PlaylistInfo:
     )
 
 
-def _thumb(entry: dict[str, Any]) -> str | None:
-    thumbs = entry.get("thumbnails")
-    if isinstance(thumbs, list):
-        for t in reversed(thumbs):
-            u = t.get("url") if isinstance(t, dict) else None
-            if isinstance(u, str) and u:
-                return "https:" + u if u.startswith("//") else u
+def _live_flag(status: Any) -> bool | None:
+    """yt-dlp's exact live_status -> SearchHit.is_live. None only when yt-dlp
+    didn't say, so /api/radio's duration heuristic only guesses then."""
+    if status == "is_live":
+        return True
+    if status in ("was_live", "is_upcoming", "not_live", "post_live"):
+        return False
     return None
 
 
@@ -708,21 +752,24 @@ def _hit(entry: Any) -> SearchHit | None:
         return SearchHit(
             kind="video", id=eid, title=title, author=_author(entry),
             # Search-grid thumbnails stay raw i.ytimg.com URLs (CLAUDE.md landmine).
-            thumbnail_url=_thumb(entry) or f"https://i.ytimg.com/vi/{eid}/hqdefault.jpg",
+            thumbnail_url=_best_thumb(entry.get("thumbnails")) or f"https://i.ytimg.com/vi/{eid}/hqdefault.jpg",
             duration_seconds=_int(entry.get("duration")),
-            is_live=True if entry.get("live_status") == "is_live" else None,
+            is_live=_live_flag(entry.get("live_status")),
         )
     if "list=" in url:
-        if eid.startswith("RD"):
-            # YouTube "Mix" radios: listed in search, but unviewable as a
-            # playlist ("This playlist type is unviewable").
+        if eid.startswith("RD") and not eid.startswith("RDCLAK"):
+            # YouTube "Mix" radios (RD<videoId>, RDMM, RDAMVM...): listed in
+            # search, but unviewable as a playlist. RDCLAK5uy... are YouTube
+            # Music album/curated playlists and open fine (measured).
             return None
         return SearchHit(
             kind="playlist", id=eid, title=title, author=_author(entry),
-            thumbnail_url=_thumb(entry) or "", video_count=_int(entry.get("playlist_count")),
+            thumbnail_url=_best_thumb(entry.get("thumbnails")) or "",
+            video_count=_int(entry.get("playlist_count")),
         )
     if "/channel/" in url or "/@" in url:
-        return SearchHit(kind="channel", id=eid, title=title, thumbnail_url=_thumb(entry) or "")
+        return SearchHit(kind="channel", id=eid, title=title,
+                         thumbnail_url=_best_thumb(entry.get("thumbnails")) or "")
     return None
 
 
